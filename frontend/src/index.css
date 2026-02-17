@@ -1,0 +1,48 @@
+/* NovaSync — Global resets & design tokens */
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap");
+
+:root {
+    /* Palette — dark mode */
+    --bg-primary: #0b0f1a;
+    --bg-surface: #111827;
+    --bg-card: rgba(30, 41, 59, 0.55);
+    --border: rgba(148, 163, 184, 0.12);
+    --text-primary: #f1f5f9;
+    --text-secondary: #94a3b8;
+    --accent: #818cf8;
+    --accent-glow: rgba(129, 140, 248, 0.25);
+    --gradient-start: #6366f1;
+    --gradient-end: #a78bfa;
+    --error: #f87171;
+    --radius: 14px;
+    --radius-sm: 8px;
+}
+
+*,
+*::before,
+*::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+html {
+    font-size: 16px;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+    font-family:
+        "Inter",
+        system-ui,
+        -apple-system,
+        sans-serif;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    min-height: 100vh;
+}
+
+#root {
+    min-height: 100vh;
+}
