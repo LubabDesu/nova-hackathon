@@ -39,3 +39,6 @@ pnpm-debug.log*
 .vscode/
 *.swp
 *.swo
+
+# Git worktrees
+.worktrees/
