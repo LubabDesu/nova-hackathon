@@ -6,6 +6,7 @@ Runs workers in deterministic order, then calls the planner model.
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date
 from dataclasses import asdict, dataclass
 import logging
@@ -17,6 +18,8 @@ from services.openrouter import (
     MediaInput,
     MediaSignal,
     build_planning_scaffold,
+    critique_planning_scaffold,
+    revise_planning_scaffold,
     extract_itinerary,
     extract_media_context,
 )
@@ -80,6 +83,8 @@ class OrchestrationResult:
     worker_reports: list[WorkerReport]
     validation_report: dict
     planner_scaffold_text: str | None = None
+    planner_critique_text: str | None = None
+    planner_revised_scaffold_text: str | None = None
     debug_trace: dict[str, Any] | None = None
 
 
@@ -107,6 +112,44 @@ def _compact_values(values: list[str], *, max_items: int = 3, max_len: int = 36)
         if len(normalized) >= max_items:
             break
     return ", ".join(normalized)
+
+
+def _render_lifestyle_section(input_directives: InputDirectives) -> str:
+    """Render lifestyle profile fields into a natural language traveller profile paragraph."""
+    lines: list[str] = []
+    if input_directives.travel_party:
+        party_map = {
+            "solo": "travelling solo",
+            "partner": "travelling with a partner",
+            "family_young_kids": "travelling with young children",
+            "family_older_kids": "travelling with older children",
+            "friends": "travelling with friends",
+            "elderly": "travelling with elderly companions",
+        }
+        described = [party_map.get(p, p) for p in input_directives.travel_party]
+        lines.append(f"Group: {', '.join(described)}")
+    if input_directives.wake_time_pref:
+        wake_map = {
+            "early_bird": "early riser (comfortable starting from 07:00)",
+            "standard": "standard wake time (starts from 09:00)",
+            "late_riser": "late riser (prefers starting from 10:00-11:00)",
+        }
+        lines.append(f"Schedule: {wake_map.get(input_directives.wake_time_pref, input_directives.wake_time_pref)}")
+    if input_directives.dietary:
+        lines.append(f"Dietary needs: {', '.join(input_directives.dietary)}")
+    if input_directives.fitness_level:
+        fitness_map = {
+            "low": "low fitness / prefers easy walking, no strenuous hikes",
+            "moderate": "moderate fitness / can handle moderate walks and activities",
+            "high": "high fitness / comfortable with strenuous activities and long hikes",
+        }
+        lines.append(f"Fitness: {fitness_map.get(input_directives.fitness_level, input_directives.fitness_level)}")
+    if input_directives.accommodation_style:
+        lines.append(f"Accommodation preference: {input_directives.accommodation_style}")
+
+    if not lines:
+        return ""
+    return "Traveller profile:\n" + "\n".join(f"- {line}" for line in lines)
 
 
 def _render_directives_section(input_directives: InputDirectives) -> str:
@@ -194,11 +237,15 @@ def _build_planner_prompt(
             f"{_truncate_text(planning_scaffold, 2600)}\n\n"
         )
 
+    lifestyle_section = _render_lifestyle_section(input_directives)
+    lifestyle_block = f"{lifestyle_section}\n\n" if lifestyle_section else ""
+
     return (
         "User travel request:\n"
         f"{idea_text}\n\n"
         "Trip context:\n"
         f"{_render_trip_context_section(trip_location=trip_location, start_date=start_date, end_date=end_date, timezone=timezone)}\n\n"
+        f"{lifestyle_block}"
         "Planning directives:\n"
         f"{_render_directives_section(input_directives)}\n\n"
         "Normalized evidence (including web research):\n"
@@ -239,12 +286,16 @@ def _build_scaffold_prompt(
     input_directives: InputDirectives,
     evidence: list[EvidenceItem],
 ) -> str:
+    lifestyle_section = _render_lifestyle_section(input_directives)
+    lifestyle_block = f"{lifestyle_section}\n\n" if lifestyle_section else ""
+
     return (
         "Prepare a concise natural-language itinerary scaffold before JSON extraction.\n\n"
         "User travel request:\n"
         f"{idea_text}\n\n"
         "Trip context:\n"
         f"{_render_trip_context_section(trip_location=trip_location, start_date=start_date, end_date=end_date, timezone=timezone)}\n\n"
+        f"{lifestyle_block}"
         "Planning directives:\n"
         f"{_render_directives_section(input_directives)}\n\n"
         "Evidence summary:\n"
@@ -418,6 +469,152 @@ def _build_media_signal_evidence(
     return evidence
 
 
+# ── Worker parallelization helpers ───────────────────────────────────────────
+
+def _run_media_workers(
+    media_inputs: list[MediaInput],
+    idea_text: str,
+) -> tuple[list[EvidenceItem], list[MediaSignal], str | None, list[WorkerReport]]:
+    """
+    Run media_context_worker followed by media_vision (sequential within media pipeline).
+    Returns (evidence, signals, vision_error, reports).
+    """
+    reports: list[WorkerReport] = []
+    all_evidence: list[EvidenceItem] = []
+    signals: list[MediaSignal] = []
+    vision_error: str | None = None
+
+    if not media_inputs:
+        reports.append(WorkerReport(worker_name="media_context_worker", status="SKIPPED", evidence_added=0, notes="No media uploads provided."))
+        reports.append(WorkerReport(worker_name="media_vision_worker", status="SKIPPED", evidence_added=0, notes="No media uploads provided."))
+        return all_evidence, signals, vision_error, reports
+
+    media_evidence = run_media_context_worker(media_inputs)
+    all_evidence.extend(media_evidence)
+    reports.append(WorkerReport(worker_name="media_context_worker", status="SUCCESS", evidence_added=len(media_evidence)))
+
+    try:
+        signals = extract_media_context(idea_text=idea_text, media_inputs=media_inputs)
+        media_signal_evidence = _build_media_signal_evidence(signals, media_inputs)
+        if media_signal_evidence:
+            all_evidence.extend(media_signal_evidence)
+            reports.append(WorkerReport(
+                worker_name="media_vision_worker",
+                status="SUCCESS",
+                evidence_added=len(media_signal_evidence),
+                notes="Extracted concise visual context via OPENROUTER_IMAGE_MODEL for downstream planning.",
+            ))
+        else:
+            reports.append(WorkerReport(
+                worker_name="media_vision_worker",
+                status="SKIPPED",
+                evidence_added=0,
+                notes="No high-confidence visual signals were extracted from uploads.",
+            ))
+    except Exception as exc:  # noqa: BLE001
+        vision_error = str(exc)
+        reports.append(WorkerReport(worker_name="media_vision_worker", status="ERROR", evidence_added=0, notes=f"Visual extraction failed: {exc}"))
+
+    return all_evidence, signals, vision_error, reports
+
+
+def _run_independent_workers(
+    *,
+    links: list[str],
+    media_inputs: list[MediaInput],
+    idea_text: str,
+    input_directives: InputDirectives,
+    trip_location: str | None,
+) -> tuple[
+    list[EvidenceItem],         # url_evidence
+    list[EvidenceItem],         # media_evidence
+    list[MediaSignal],          # media_signals
+    str | None,                 # media_vision_error
+    list[EvidenceItem],         # web_evidence
+    dict[str, Any],             # web_research_debug
+    list[WorkerReport],
+]:
+    """
+    Run url, media, and web_research workers in parallel via ThreadPoolExecutor.
+    web_grounding stays sequential (depends on web_research output).
+    Each worker failure is isolated.
+    """
+    url_evidence: list[EvidenceItem] = []
+    media_evidence: list[EvidenceItem] = []
+    media_signals: list[MediaSignal] = []
+    media_vision_error: str | None = None
+    web_evidence: list[EvidenceItem] = []
+    web_research_debug: dict[str, Any] = {}
+    reports: list[WorkerReport] = []
+
+    def _run_url() -> tuple[str, list[EvidenceItem]]:
+        if not links:
+            return "skipped", []
+        logger.info("Worker input -> url_context_worker: links_count=%s links=%s", len(links), links[:WORKER_INPUT_LOG_MAX_ITEMS])
+        return "success", run_url_context_worker(links)
+
+    def _run_media() -> tuple[list[EvidenceItem], list[MediaSignal], str | None, list[WorkerReport]]:
+        logger.info(
+            "Worker input -> media_context_worker: media_count=%s",
+            len(media_inputs),
+        )
+        return _run_media_workers(media_inputs, idea_text)
+
+    def _run_web() -> Any:
+        logger.info(
+            "Worker input -> web_research_worker: idea_preview=%s location=%s",
+            _preview_for_log(idea_text),
+            trip_location,
+        )
+        return run_web_research_worker(
+            idea_text=idea_text,
+            input_directives=input_directives,
+            trip_location=trip_location,
+        )
+
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        futures = {
+            pool.submit(_run_url): "url",
+            pool.submit(_run_media): "media",
+            pool.submit(_run_web): "web",
+        }
+        for future in as_completed(futures):
+            kind = futures[future]
+            try:
+                result = future.result()
+                if kind == "url":
+                    status, ev = result
+                    url_evidence = ev
+                    if status == "skipped":
+                        reports.append(WorkerReport(worker_name="url_context_worker", status="SKIPPED", evidence_added=0, notes="No links provided."))
+                    else:
+                        reports.append(WorkerReport(worker_name="url_context_worker", status="SUCCESS", evidence_added=len(ev)))
+                elif kind == "media":
+                    m_ev, m_signals, m_err, m_reports = result
+                    media_evidence = m_ev
+                    media_signals = m_signals
+                    media_vision_error = m_err
+                    reports.extend(m_reports)
+                elif kind == "web":
+                    web_evidence = result.evidence
+                    web_research_debug = result.debug
+                    reports.append(WorkerReport(
+                        worker_name="web_research_worker",
+                        status="SUCCESS",
+                        evidence_added=len(web_evidence),
+                        notes=(
+                            f"query_source={web_research_debug.get('query_source', 'unknown')} "
+                            f"queries={len(web_research_debug.get('queries_executed', []))}"
+                        ),
+                    ))
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("Parallel worker %s failed: %s", kind, exc)
+                name_map = {"url": "url_context_worker", "media": "media_context_worker", "web": "web_research_worker"}
+                reports.append(WorkerReport(worker_name=name_map[kind], status="ERROR", evidence_added=0, notes=str(exc)))
+
+    return url_evidence, media_evidence, media_signals, media_vision_error, web_evidence, web_research_debug, reports
+
+
 def orchestrate_itinerary_planning(
     *,
     idea_text: str,
@@ -438,137 +635,59 @@ def orchestrate_itinerary_planning(
     media_signals_for_debug: list[MediaSignal] = []
     media_vision_error: str | None = None
 
-    logger.info(
-        "Worker input -> url_context_worker: links_count=%s links=%s",
-        len(links),
-        links[:WORKER_INPUT_LOG_MAX_ITEMS],
-    )
-    if links:
-        url_evidence = run_url_context_worker(links)
+    parallelism_enabled = _env_bool("WORKER_PARALLELISM_ENABLED", True)
+    if parallelism_enabled:
+        logger.info("Running url/media/web_research workers in parallel (WORKER_PARALLELISM_ENABLED=true)")
+        (
+            url_evidence,
+            para_media_evidence,
+            media_signals_for_debug,
+            media_vision_error,
+            web_evidence,
+            web_research_debug,
+            worker_reports,
+        ) = _run_independent_workers(
+            links=links,
+            media_inputs=media_inputs,
+            idea_text=idea_text,
+            input_directives=input_directives,
+            trip_location=trip_location,
+        )
         merged_evidence.extend(url_evidence)
-        reports.append(
-            WorkerReport(
-                worker_name="url_context_worker",
-                status="SUCCESS",
-                evidence_added=len(url_evidence),
-            )
-        )
+        merged_evidence.extend(para_media_evidence)
+        merged_evidence.extend(web_evidence)
+        reports.extend(worker_reports)
     else:
-        reports.append(
-            WorkerReport(
-                worker_name="url_context_worker",
-                status="SKIPPED",
-                evidence_added=0,
-                notes="No links provided.",
-            )
-        )
+        logger.info("Running url/media/web_research workers sequentially (WORKER_PARALLELISM_ENABLED=false)")
+        # Sequential fallback
+        logger.info("Worker input -> url_context_worker: links_count=%s", len(links))
+        if links:
+            url_evidence = run_url_context_worker(links)
+            merged_evidence.extend(url_evidence)
+            reports.append(WorkerReport(worker_name="url_context_worker", status="SUCCESS", evidence_added=len(url_evidence)))
+        else:
+            reports.append(WorkerReport(worker_name="url_context_worker", status="SKIPPED", evidence_added=0, notes="No links provided."))
 
-    logger.info(
-        "Worker input -> media_context_worker: media_count=%s media=%s",
-        len(media_inputs),
-        [
-            {
-                "filename": media.filename,
-                "mime_type": media.mime_type,
-                "data_url_chars": len(media.data_url or ""),
-            }
-            for media in media_inputs[:WORKER_INPUT_LOG_MAX_ITEMS]
-        ],
-    )
-    if media_inputs:
-        media_evidence = run_media_context_worker(media_inputs)
-        merged_evidence.extend(media_evidence)
-        reports.append(
-            WorkerReport(
-                worker_name="media_context_worker",
-                status="SUCCESS",
-                evidence_added=len(media_evidence),
-            )
-        )
-        try:
-            media_signals = extract_media_context(
-                idea_text=idea_text,
-                media_inputs=media_inputs,
-            )
-            media_signals_for_debug = media_signals
-            media_signal_evidence = _build_media_signal_evidence(
-                media_signals,
-                media_inputs,
-            )
-            if media_signal_evidence:
-                merged_evidence.extend(media_signal_evidence)
-                reports.append(
-                    WorkerReport(
-                        worker_name="media_vision_worker",
-                        status="SUCCESS",
-                        evidence_added=len(media_signal_evidence),
-                        notes=(
-                            "Extracted concise visual context via OPENROUTER_IMAGE_MODEL "
-                            "for downstream planning."
-                        ),
-                    )
-                )
-            else:
-                reports.append(
-                    WorkerReport(
-                        worker_name="media_vision_worker",
-                        status="SKIPPED",
-                        evidence_added=0,
-                        notes=(
-                            "No high-confidence visual signals were extracted from uploads."
-                        ),
-                    )
-                )
-        except Exception as exc:  # noqa: BLE001
-            media_vision_error = str(exc)
-            reports.append(
-                WorkerReport(
-                    worker_name="media_vision_worker",
-                    status="ERROR",
-                    evidence_added=0,
-                    notes=f"Visual extraction failed: {exc}",
-                )
-            )
-    else:
-        reports.append(
-            WorkerReport(
-                worker_name="media_context_worker",
-                status="SKIPPED",
-                evidence_added=0,
-                notes="No media uploads provided.",
-            )
-        )
-        reports.append(
-            WorkerReport(
-                worker_name="media_vision_worker",
-                status="SKIPPED",
-                evidence_added=0,
-                notes="No media uploads provided.",
-            )
-        )
+        if media_inputs:
+            seq_media_ev, seq_signals, seq_vis_err, seq_media_reports = _run_media_workers(media_inputs, idea_text)
+            merged_evidence.extend(seq_media_ev)
+            media_signals_for_debug = seq_signals
+            media_vision_error = seq_vis_err
+            reports.extend(seq_media_reports)
+        else:
+            reports.append(WorkerReport(worker_name="media_context_worker", status="SKIPPED", evidence_added=0, notes="No media uploads provided."))
+            reports.append(WorkerReport(worker_name="media_vision_worker", status="SKIPPED", evidence_added=0, notes="No media uploads provided."))
 
-    # Step 4: always run web research worker.
-    logger.info(
-        "Worker input -> web_research_worker: idea_preview=%s location=%s directives=%s",
-        _preview_for_log(idea_text),
-        trip_location,
-        {
-            "hard_constraints": input_directives.hard_constraints[:WORKER_INPUT_LOG_MAX_ITEMS],
-            "soft_preferences": input_directives.soft_preferences[:WORKER_INPUT_LOG_MAX_ITEMS],
-            "must_include": input_directives.must_include[:WORKER_INPUT_LOG_MAX_ITEMS],
-            "avoid": input_directives.avoid[:WORKER_INPUT_LOG_MAX_ITEMS],
-        },
-    )
-    web_research_result = run_web_research_worker(
-        idea_text=idea_text,
-        input_directives=input_directives,
-        trip_location=trip_location,
-    )
-    web_evidence = web_research_result.evidence
-    web_research_debug = web_research_result.debug
-    merged_evidence.extend(web_evidence)
-    reports.append(
-        WorkerReport(
+        logger.info("Worker input -> web_research_worker: idea_preview=%s location=%s", _preview_for_log(idea_text), trip_location)
+        web_research_result = run_web_research_worker(
+            idea_text=idea_text,
+            input_directives=input_directives,
+            trip_location=trip_location,
+        )
+        web_evidence = web_research_result.evidence
+        web_research_debug = web_research_result.debug
+        merged_evidence.extend(web_evidence)
+        reports.append(WorkerReport(
             worker_name="web_research_worker",
             status="SUCCESS",
             evidence_added=len(web_evidence),
@@ -576,8 +695,7 @@ def orchestrate_itinerary_planning(
                 f"query_source={web_research_debug.get('query_source', 'unknown')} "
                 f"queries={len(web_research_debug.get('queries_executed', []))}"
             ),
-        )
-    )
+        ))
 
     logger.info(
         "Worker input -> web_grounding_worker: citations=%s",
@@ -684,6 +802,110 @@ def orchestrate_itinerary_planning(
             )
         )
 
+    # ── Critique / Revise loop ────────────────────────────────────────────────
+    critique_enabled = _env_bool("PLANNER_CRITIQUE_ENABLED", True)
+    planner_critique_text: str | None = None
+    planner_revised_scaffold_text: str | None = None
+    # The scaffold used for extraction (may be swapped for revised version)
+    active_scaffold_text = planner_scaffold_text
+
+    if critique_enabled and planner_scaffold_text:
+        try:
+            critique_text, _critique_debug = critique_planning_scaffold(
+                scaffold_text=planner_scaffold_text,
+                idea_text=idea_text,
+                input_directives=input_directives,
+                start_date=start_date,
+                end_date=end_date,
+            )
+            if critique_text:
+                planner_critique_text = critique_text
+                reports.append(
+                    WorkerReport(
+                        worker_name="planner_critique_worker",
+                        status="SUCCESS",
+                        evidence_added=0,
+                        notes=f"critique_chars={len(critique_text)}",
+                    )
+                )
+                needs_revision = "verdict: needs_revision" in critique_text.lower()
+                if needs_revision:
+                    try:
+                        revised_text, _revise_debug = revise_planning_scaffold(
+                            original_scaffold=planner_scaffold_text,
+                            critique_text=critique_text,
+                            idea_text=idea_text,
+                            input_directives=input_directives,
+                            start_date=start_date,
+                            end_date=end_date,
+                        )
+                        if revised_text:
+                            planner_revised_scaffold_text = revised_text
+                            active_scaffold_text = revised_text
+                            reports.append(
+                                WorkerReport(
+                                    worker_name="planner_revise_worker",
+                                    status="SUCCESS",
+                                    evidence_added=0,
+                                    notes=f"revised_chars={len(revised_text)}",
+                                )
+                            )
+                        else:
+                            reports.append(
+                                WorkerReport(
+                                    worker_name="planner_revise_worker",
+                                    status="SKIPPED",
+                                    evidence_added=0,
+                                    notes="Revise model returned empty; using original scaffold.",
+                                )
+                            )
+                    except Exception as exc:  # noqa: BLE001
+                        reports.append(
+                            WorkerReport(
+                                worker_name="planner_revise_worker",
+                                status="ERROR",
+                                evidence_added=0,
+                                notes=f"Revision failed (using original): {exc}",
+                            )
+                        )
+                else:
+                    reports.append(
+                        WorkerReport(
+                            worker_name="planner_revise_worker",
+                            status="SKIPPED",
+                            evidence_added=0,
+                            notes="Critique verdict: approved — no revision needed.",
+                        )
+                    )
+            else:
+                reports.append(
+                    WorkerReport(
+                        worker_name="planner_critique_worker",
+                        status="SKIPPED",
+                        evidence_added=0,
+                        notes="Critique model returned empty output.",
+                    )
+                )
+        except Exception as exc:  # noqa: BLE001
+            reports.append(
+                WorkerReport(
+                    worker_name="planner_critique_worker",
+                    status="ERROR",
+                    evidence_added=0,
+                    notes=f"Critique failed: {exc}",
+                )
+            )
+    else:
+        reason = "No scaffold to critique." if not planner_scaffold_text else "Disabled via PLANNER_CRITIQUE_ENABLED."
+        reports.append(
+            WorkerReport(
+                worker_name="planner_critique_worker",
+                status="SKIPPED",
+                evidence_added=0,
+                notes=reason,
+            )
+        )
+
     planner_prompt = _build_planner_prompt(
         idea_text=idea_text,
         trip_location=trip_location,
@@ -692,7 +914,7 @@ def orchestrate_itinerary_planning(
         timezone=timezone,
         input_directives=input_directives,
         evidence=planner_evidence,
-        planning_scaffold=planner_scaffold_text,
+        planning_scaffold=active_scaffold_text,
     )
     planner_nodes = extract_itinerary(planner_prompt)
     plan_draft = build_plan_draft(
@@ -727,9 +949,11 @@ def orchestrate_itinerary_planning(
             "total_available_items": len(merged_evidence),
         },
         "planner_prompt_chars": len(planner_prompt),
-        "planner_prompt_includes_scaffold": bool(planner_scaffold_text),
+        "planner_prompt_includes_scaffold": bool(active_scaffold_text),
         "planner_scaffold_prompt_chars": len(planner_scaffold_prompt or ""),
         "planner_scaffold_text": planner_scaffold_text,
+        "planner_critique_text": planner_critique_text,
+        "planner_revised_scaffold_text": planner_revised_scaffold_text,
         "planner_scaffold_debug": planner_scaffold_debug,
         "web_query_builder": web_research_debug,
     }
@@ -740,6 +964,8 @@ def orchestrate_itinerary_planning(
         worker_reports=reports,
         validation_report=plan_validation_as_dict(validation_result),
         planner_scaffold_text=planner_scaffold_text,
+        planner_critique_text=planner_critique_text,
+        planner_revised_scaffold_text=planner_revised_scaffold_text,
         debug_trace=debug_trace,
     )
 

@@ -625,6 +625,22 @@ async def process_idea_stream(
                         "chars": len(orchestration.planner_scaffold_text),
                     },
                 )
+            if orchestration.planner_critique_text:
+                yield emit(
+                    "planner_critique",
+                    {
+                        "label": "Self-review",
+                        "text": orchestration.planner_critique_text,
+                    },
+                )
+            if orchestration.planner_revised_scaffold_text:
+                yield emit(
+                    "planner_revised_reasoning",
+                    {
+                        "label": "Improved draft",
+                        "text": orchestration.planner_revised_scaffold_text,
+                    },
+                )
 
             day_batches = _build_node_day_batches(nodes)
             total_batches = len(day_batches)

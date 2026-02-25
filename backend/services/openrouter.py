@@ -783,6 +783,276 @@ def build_planning_scaffold(
     return scaffold_text, debug
 
 
+def critique_planning_scaffold(
+    *,
+    scaffold_text: str,
+    idea_text: str,
+    input_directives: Any,
+    start_date: Any,
+    end_date: Any,
+) -> tuple[str | None, dict[str, Any]]:
+    """
+    Critique a planning scaffold for problems before revision.
+
+    Checks timings, constraint violations, lifestyle mismatches, day density,
+    must-include completeness, and wake-time alignment.
+
+    Returns critique text ending with VERDICT: needs_revision or VERDICT: approved,
+    plus debug metadata. Fails open — caller falls back to original scaffold on error.
+    """
+    from models import InputDirectives as _InputDirectives
+
+    api_key = os.environ.get("OPENROUTER_API_KEY", "").strip()
+    if not api_key:
+        return None, {"error": "OPENROUTER_API_KEY is not set."}
+
+    primary_model = os.environ.get("OPENROUTER_CRITIQUE_MODEL", "").strip()
+    if not primary_model:
+        primary_model = os.environ.get("OPENROUTER_COT_MODEL", "").strip()
+    if not primary_model:
+        primary_model = os.environ.get("OPENROUTER_MODEL", "openrouter/free").strip()
+    models = _resolve_scaffold_models(primary_model)
+
+    timeout_seconds_raw = os.environ.get("OPENROUTER_CRITIQUE_TIMEOUT_SECONDS", "20")
+    try:
+        timeout_seconds = float(timeout_seconds_raw)
+    except ValueError:
+        timeout_seconds = 20.0
+    timeout_seconds = max(5.0, min(timeout_seconds, 60.0))
+
+    # Build a compact directives summary for the critique prompt
+    directives_lines: list[str] = []
+    if isinstance(input_directives, _InputDirectives):
+        if input_directives.hard_constraints:
+            directives_lines.append(f"Hard constraints: {'; '.join(input_directives.hard_constraints[:6])}")
+        if input_directives.avoid:
+            directives_lines.append(f"Avoid: {'; '.join(input_directives.avoid[:6])}")
+        if input_directives.must_include:
+            directives_lines.append(f"Must include: {'; '.join(input_directives.must_include[:6])}")
+        if input_directives.pace:
+            directives_lines.append(f"Pace: {input_directives.pace}")
+        if input_directives.wake_time_pref:
+            directives_lines.append(f"Wake time: {input_directives.wake_time_pref}")
+        if input_directives.travel_party:
+            directives_lines.append(f"Travel party: {'; '.join(input_directives.travel_party)}")
+        if input_directives.dietary:
+            directives_lines.append(f"Dietary: {'; '.join(input_directives.dietary)}")
+        if input_directives.fitness_level:
+            directives_lines.append(f"Fitness level: {input_directives.fitness_level}")
+        if input_directives.mobility_mode:
+            directives_lines.append(f"Mobility: {input_directives.mobility_mode}")
+    directives_summary = "\n".join(directives_lines) if directives_lines else "None provided."
+
+    date_range = ""
+    if start_date and end_date:
+        date_range = f"{start_date} to {end_date}"
+    elif start_date:
+        date_range = f"from {start_date}"
+
+    user_prompt = (
+        "Review this draft travel itinerary scaffold for quality problems. "
+        "Be concise and specific. Flag only real issues.\n\n"
+        f"User request: {idea_text[:600]}\n\n"
+        f"Trip dates: {date_range or 'not specified'}\n\n"
+        f"Traveller directives:\n{directives_summary}\n\n"
+        "Draft scaffold to review:\n"
+        f"{scaffold_text[:3000]}\n\n"
+        "Check for:\n"
+        "1. TIMING: Activities obviously too short (museum <60min, dining <45min) or too long\n"
+        "2. CONSTRAINTS: Any hard constraint or avoid item violated\n"
+        "3. LIFESTYLE: Activities inconsistent with travel_party, dietary, or fitness_level\n"
+        "4. DENSITY: Sparse days or overpacked days relative to stated pace\n"
+        "5. MUST-INCLUDE: All must_include items present\n"
+        "6. WAKE TIME: First activity consistent with wake_time_pref\n\n"
+        "Format: bullet points, each starting with the category name. "
+        "Be specific (e.g. 'Day 2: museum visit at 20 min is too short'). "
+        "If no real issues found, say so.\n\n"
+        "End your response with exactly one of:\n"
+        "VERDICT: needs_revision\n"
+        "VERDICT: approved"
+    )
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+
+    critique_text: str | None = None
+    error: str | None = None
+    attempts: list[dict[str, Any]] = []
+
+    with httpx.Client(timeout=timeout_seconds) as client:
+        for model in models:
+            attempt: dict[str, Any] = {"model": model}
+            payload: dict[str, Any] = {
+                "model": model,
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are a meticulous travel plan reviewer. "
+                            "Identify specific, actionable problems with draft itineraries. "
+                            "Be concise — bullet points only. No explanations beyond what is needed."
+                        ),
+                    },
+                    {"role": "user", "content": user_prompt},
+                ],
+                "temperature": 0.1,
+            }
+            try:
+                data = _post_openrouter(client=client, payload=payload, headers=headers)
+                raw_text = _message_content_to_text(data)
+                candidate = _sanitize_planning_scaffold(raw_text)
+                attempt["status"] = "ok"
+                attempt["response_model"] = data.get("model")
+                attempt["critique_chars"] = len(candidate)
+                attempts.append(attempt)
+                if candidate:
+                    critique_text = candidate
+                    break
+                error = "Critique model returned empty text."
+            except httpx.HTTPStatusError as exc:
+                detail = exc.response.text[:1500]
+                error = f"HTTP {exc.response.status_code} (model={model})"
+                attempt["status"] = "http_error"
+                attempt["http_status"] = exc.response.status_code
+                attempt["error_body_excerpt"] = detail
+                attempts.append(attempt)
+            except Exception as exc:  # noqa: BLE001
+                error = str(exc)
+                attempt["status"] = "exception"
+                attempt["error"] = str(exc)
+                attempts.append(attempt)
+
+    debug: dict[str, Any] = {
+        "critique_model_requested": primary_model,
+        "timeout_seconds": timeout_seconds,
+        "critique_chars": len(critique_text or ""),
+        "error": error,
+        "attempts": attempts,
+    }
+    return critique_text, debug
+
+
+def revise_planning_scaffold(
+    *,
+    original_scaffold: str,
+    critique_text: str,
+    idea_text: str,
+    input_directives: Any,
+    start_date: Any,
+    end_date: Any,
+) -> tuple[str | None, dict[str, Any]]:
+    """
+    Produce a revised scaffold that addresses critique issues.
+
+    Returns revised text plus debug metadata. Fails open — caller uses
+    original scaffold if this returns None or raises.
+    """
+    from models import InputDirectives as _InputDirectives
+
+    api_key = os.environ.get("OPENROUTER_API_KEY", "").strip()
+    if not api_key:
+        return None, {"error": "OPENROUTER_API_KEY is not set."}
+
+    primary_model = os.environ.get("OPENROUTER_CRITIQUE_MODEL", "").strip()
+    if not primary_model:
+        primary_model = os.environ.get("OPENROUTER_COT_MODEL", "").strip()
+    if not primary_model:
+        primary_model = os.environ.get("OPENROUTER_MODEL", "openrouter/free").strip()
+    models = _resolve_scaffold_models(primary_model)
+
+    timeout_seconds_raw = os.environ.get("OPENROUTER_CRITIQUE_TIMEOUT_SECONDS", "20")
+    try:
+        timeout_seconds = float(timeout_seconds_raw)
+    except ValueError:
+        timeout_seconds = 20.0
+    timeout_seconds = max(5.0, min(timeout_seconds, 90.0))
+
+    date_range = ""
+    if start_date and end_date:
+        date_range = f"{start_date} to {end_date}"
+
+    user_prompt = (
+        "Revise this travel itinerary scaffold to fix the identified problems.\n\n"
+        f"User request: {idea_text[:600]}\n\n"
+        f"Trip dates: {date_range or 'not specified'}\n\n"
+        "Original scaffold:\n"
+        f"{original_scaffold[:2600]}\n\n"
+        "Problems to fix:\n"
+        f"{critique_text[:1200]}\n\n"
+        "Output requirements:\n"
+        "- Plain text only.\n"
+        "- Produce a complete revised scaffold addressing each flagged issue.\n"
+        "- Keep the same day-by-day structure.\n"
+        "- Fix timing durations, constraint violations, lifestyle mismatches, and density issues.\n"
+        "- If must-include items were missing, add them to appropriate days.\n"
+        "- Adjust first-activity timing if wake_time issue was flagged.\n"
+        "- Do not add new activities beyond what is needed to fix the issues."
+    )
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+
+    revised_text: str | None = None
+    error: str | None = None
+    attempts: list[dict[str, Any]] = []
+
+    output_max_chars = _env_int(
+        "OPENROUTER_COT_OUTPUT_MAX_CHARS",
+        2400,
+        min_value=300,
+        max_value=8000,
+    )
+
+    with httpx.Client(timeout=timeout_seconds) as client:
+        for model in models:
+            attempt: dict[str, Any] = {"model": model}
+            payload: dict[str, Any] = {
+                "model": model,
+                "messages": [
+                    {"role": "system", "content": PLANNING_SCAFFOLD_SYSTEM_PROMPT},
+                    {"role": "user", "content": user_prompt},
+                ],
+                "temperature": 0.2,
+            }
+            try:
+                data = _post_openrouter(client=client, payload=payload, headers=headers)
+                raw_text = _message_content_to_text(data)
+                candidate = _sanitize_planning_scaffold(raw_text)
+                attempt["status"] = "ok"
+                attempt["response_model"] = data.get("model")
+                attempt["revised_chars"] = len(candidate)
+                attempts.append(attempt)
+                if candidate:
+                    revised_text = candidate[:output_max_chars]
+                    break
+                error = "Revise model returned empty text."
+            except httpx.HTTPStatusError as exc:
+                detail = exc.response.text[:1500]
+                error = f"HTTP {exc.response.status_code} (model={model})"
+                attempt["status"] = "http_error"
+                attempt["http_status"] = exc.response.status_code
+                attempt["error_body_excerpt"] = detail
+                attempts.append(attempt)
+            except Exception as exc:  # noqa: BLE001
+                error = str(exc)
+                attempt["status"] = "exception"
+                attempt["error"] = str(exc)
+                attempts.append(attempt)
+
+    debug: dict[str, Any] = {
+        "revise_model_requested": primary_model,
+        "timeout_seconds": timeout_seconds,
+        "revised_chars": len(revised_text or ""),
+        "error": error,
+        "attempts": attempts,
+    }
+    return revised_text, debug
+
+
 def build_web_queries(
     *,
     idea_text: str,
