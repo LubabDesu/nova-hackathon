@@ -4,7 +4,7 @@ NovaSync — Pydantic models for request / response validation.
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
@@ -41,6 +41,16 @@ class ProcessIdeaRequest(BaseModel):
         default=None,
         description="Trip end date in YYYY-MM-DD format.",
     )
+    trip_window_mode: Literal["fixed", "not_decided"] = Field(
+        default="fixed",
+        description="Date selection mode. fixed=start/end provided, not_decided=derive from trip_days.",
+    )
+    trip_days: int | None = Field(
+        default=None,
+        ge=1,
+        le=60,
+        description="Trip length in days when exact dates are not decided.",
+    )
     timezone: str | None = Field(
         default=None,
         description="IANA timezone (for example, Australia/Hobart).",
@@ -56,8 +66,31 @@ class ProcessIdeaRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_trip_window(self) -> "ProcessIdeaRequest":
-        if self.start_date and self.end_date and self.start_date > self.end_date:
+        has_start = self.start_date is not None
+        has_end = self.end_date is not None
+
+        if has_start != has_end:
+            raise ValueError(
+                "Provide both `start_date` and `end_date`, or leave both empty and provide `trip_days`."
+            )
+
+        if has_start and has_end and self.start_date > self.end_date:
             raise ValueError("`start_date` must be earlier than or equal to `end_date`.")
+
+        # If exact dates are not provided, derive a deterministic date window from trip length.
+        if not has_start and not has_end:
+            if self.trip_days is None:
+                raise ValueError(
+                    "Trip dates are required. Provide `start_date` and `end_date`, "
+                    "or choose not decided mode and provide `trip_days`."
+                )
+
+            derived_start = date.today()
+            derived_end = derived_start + timedelta(days=max(1, self.trip_days) - 1)
+            self.start_date = derived_start
+            self.end_date = derived_end
+            self.trip_window_mode = "not_decided"
+
         return self
 
 
@@ -72,12 +105,15 @@ class ItineraryNode(BaseModel):
     lat: float | None = None
     long: float | None = None
     description: str | None = None
+    segment_origin: Literal["model", "synthetic"] | None = None
+    segment_kind: Literal["activity", "transfer", "buffer", "rest"] | None = None
 
 
 # ── Response ────────────────────────────────────────────────────────────────
 class ProcessIdeaResponse(BaseModel):
     trip_id: str
     nodes: list[ItineraryNode]
+    planner_scaffold_text: str | None = None
 
 
 # ── Internal Orchestration Models ───────────────────────────────────────────
@@ -93,6 +129,15 @@ class EvidenceDebug(BaseModel):
     fetch_status: str | None = None
     page_title: str | None = None
     content_excerpt: str | None = None
+    parsed_text_preview: str | None = None
+    raw_text_preview: str | None = None
+    parsed_text_full: str | None = None
+    raw_text_full: str | None = None
+    llm_condensed_preview: str | None = None
+    llm_condensed_full: str | None = None
+    llm_summary_model: str | None = None
+    llm_summary_error: str | None = None
+    llm_summary_trace: dict[str, object] | None = None
     time_hint_sentences: list[str] = Field(default_factory=list)
     constraint_sentences: list[str] = Field(default_factory=list)
 

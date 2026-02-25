@@ -1,6 +1,10 @@
 // NovaSync — API service layer
 
-import type { InputDirectives, ProcessIdeaApiResponse } from "../types";
+import type {
+    InputDirectives,
+    ProcessIdeaApiResponse,
+    UrlScraperDebugResponse,
+} from "../types";
 
 const API_BASE = "http://localhost:8000/api";
 
@@ -9,21 +13,31 @@ interface ProcessIdeaOptions {
     tripLocation?: string;
     startDate?: string;
     endDate?: string;
+    tripWindowMode?: "fixed" | "not_decided";
+    tripDays?: number;
     files?: File[];
     links?: string[];
     inputDirectives?: InputDirectives;
     debug?: boolean;
 }
 
-export async function processIdea(
-    idea: string,
-    options: ProcessIdeaOptions = {},
-): Promise<ProcessIdeaApiResponse> {
+export interface StreamEvent {
+    event: string;
+    data: Record<string, unknown>;
+}
+
+interface ProcessIdeaStreamHandlers {
+    onEvent?: (evt: StreamEvent) => void;
+}
+
+function buildFormData(idea: string, options: ProcessIdeaOptions): FormData {
     const {
         tripId,
         tripLocation,
         startDate,
         endDate,
+        tripWindowMode = "fixed",
+        tripDays,
         files = [],
         links = [],
         inputDirectives = {
@@ -32,7 +46,6 @@ export async function processIdea(
             must_include: [],
             avoid: [],
         },
-        debug = false,
     } = options;
 
     const formData = new FormData();
@@ -52,10 +65,47 @@ export async function processIdea(
     if (endDate) {
         formData.append("end_date", endDate);
     }
+    formData.append("trip_window_mode", tripWindowMode);
+    if (typeof tripDays === "number" && Number.isFinite(tripDays)) {
+        formData.append("trip_days", String(Math.trunc(tripDays)));
+    }
 
     for (const file of files) {
         formData.append("files", file);
     }
+    return formData;
+}
+
+function parseSseFrame(frame: string): StreamEvent | null {
+    const lines = frame.split("\n");
+    let eventName = "message";
+    const dataLines: string[] = [];
+
+    for (const line of lines) {
+        if (line.startsWith("event:")) {
+            eventName = line.slice("event:".length).trim();
+        } else if (line.startsWith("data:")) {
+            dataLines.push(line.slice("data:".length).trimStart());
+        }
+    }
+
+    if (dataLines.length === 0) {
+        return null;
+    }
+
+    const raw = dataLines.join("\n");
+    return {
+        event: eventName,
+        data: JSON.parse(raw) as Record<string, unknown>,
+    };
+}
+
+export async function processIdea(
+    idea: string,
+    options: ProcessIdeaOptions = {},
+): Promise<ProcessIdeaApiResponse> {
+    const { debug = false } = options;
+    const formData = buildFormData(idea, options);
 
     const url = new URL(`${API_BASE}/process-idea`);
     if (debug) {
@@ -73,4 +123,104 @@ export async function processIdea(
     }
 
     return res.json() as Promise<ProcessIdeaApiResponse>;
+}
+
+export async function processIdeaStream(
+    idea: string,
+    options: ProcessIdeaOptions = {},
+    handlers: ProcessIdeaStreamHandlers = {},
+): Promise<ProcessIdeaApiResponse> {
+    const { debug = false } = options;
+    const formData = buildFormData(idea, options);
+
+    const url = new URL(`${API_BASE}/process-idea/stream`);
+    if (debug) {
+        url.searchParams.set("debug", "true");
+    }
+
+    const res = await fetch(url.toString(), {
+        method: "POST",
+        body: formData,
+        headers: {
+            Accept: "text/event-stream",
+        },
+    });
+
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: res.statusText }));
+        throw new Error(err.detail ?? "Streaming request failed");
+    }
+
+    if (!res.body) {
+        throw new Error("Streaming response body is missing");
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let finalPayload: ProcessIdeaApiResponse | null = null;
+    let streamError: string | null = null;
+
+    while (true) {
+        const { done, value } = await reader.read();
+        if (done) {
+            break;
+        }
+        buffer += decoder.decode(value, { stream: true });
+        const frames = buffer.split("\n\n");
+        buffer = frames.pop() ?? "";
+
+        for (const frame of frames) {
+            const parsed = parseSseFrame(frame);
+            if (!parsed) continue;
+            handlers.onEvent?.(parsed);
+
+            if (parsed.event === "final") {
+                finalPayload = parsed.data as unknown as ProcessIdeaApiResponse;
+            } else if (parsed.event === "error") {
+                streamError = String(parsed.data.message ?? "Streaming failed");
+            }
+        }
+    }
+
+    if (buffer.trim().length > 0) {
+        const trailing = parseSseFrame(buffer.trim());
+        if (trailing) {
+            handlers.onEvent?.(trailing);
+            if (trailing.event === "final") {
+                finalPayload = trailing.data as unknown as ProcessIdeaApiResponse;
+            } else if (trailing.event === "error") {
+                streamError = String(trailing.data.message ?? "Streaming failed");
+            }
+        }
+    }
+
+    if (streamError) {
+        throw new Error(streamError);
+    }
+
+    if (!finalPayload) {
+        throw new Error("Stream ended without final payload");
+    }
+
+    return finalPayload;
+}
+
+export async function debugUrlScraper(
+    links: string[],
+): Promise<UrlScraperDebugResponse> {
+    const res = await fetch(`${API_BASE}/debug/url-scraper`, {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ links }),
+    });
+
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: res.statusText }));
+        throw new Error(err.detail ?? "URL scraper debug request failed");
+    }
+
+    return res.json() as Promise<UrlScraperDebugResponse>;
 }

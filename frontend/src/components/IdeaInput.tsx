@@ -5,9 +5,20 @@ import { useState } from "react";
 interface IdeaInputProps {
     onSubmit: (idea: string) => void;
     loading: boolean;
+    loadingPhaseLabel?: string;
+    loadingPhaseDetail?: string;
+    loadingStepIndex?: number;
+    loadingTotalSteps?: number;
 }
 
-export default function IdeaInput({ onSubmit, loading }: IdeaInputProps) {
+export default function IdeaInput({
+    onSubmit,
+    loading,
+    loadingPhaseLabel,
+    loadingPhaseDetail,
+    loadingStepIndex,
+    loadingTotalSteps,
+}: IdeaInputProps) {
     const [idea, setIdea] = useState("");
 
     const handleSubmit = () => {
@@ -21,8 +32,7 @@ export default function IdeaInput({ onSubmit, loading }: IdeaInputProps) {
                 <span className="zone-icon">✨</span> Drop Your Travel Ideas
             </h2>
             <p className="zone-subtitle">
-                Paste your raw, unstructured travel plans below. NovaSync will
-                extract a structured itinerary using Amazon Nova Pro.
+                What else do you want the model to know?
             </p>
             <textarea
                 className="idea-textarea"
@@ -45,6 +55,24 @@ export default function IdeaInput({ onSubmit, loading }: IdeaInputProps) {
                     "Extract Itinerary →"
                 )}
             </button>
+            {loading && (
+                <div className="planning-progress-card">
+                    <p className="planning-progress-kicker">
+                        Planner status
+                        {typeof loadingStepIndex === "number" &&
+                        typeof loadingTotalSteps === "number"
+                            ? ` • Step ${loadingStepIndex + 1} of ${loadingTotalSteps}`
+                            : ""}
+                    </p>
+                    <p className="planning-progress-title">
+                        {loadingPhaseLabel ?? "Processing request"}
+                    </p>
+                    <p className="planning-progress-detail">
+                        {loadingPhaseDetail ??
+                            "Running trip-planning pipeline..."}
+                    </p>
+                </div>
+            )}
         </div>
     );
 }

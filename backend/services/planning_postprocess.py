@@ -17,12 +17,20 @@ MAX_ACTIVITY_DURATION_MINS = 12 * 60
 MIN_ACTIVITY_DURATION_MINS = 10
 DEFAULT_ACTIVITY_TYPE = "sightseeing"
 DEFAULT_ACTIVITY_DURATION_MINS = 90
-DEFAULT_DAY_START_MINS = 9 * 60
+DEFAULT_DAY_START_MINS = 9 * 60      # used only when backfilling a MISSING start time
+EARLIEST_ALLOWED_START_MINS = 5 * 60  # hard floor: explicit model times are respected down to 5am
 DEFAULT_ACTIVITY_GAP_MINS = 30
-DEFAULT_DAY_END_MINS = 21 * 60
+DEFAULT_DAY_END_MINS = 22 * 60
 NIGHT_START_MINS = 19 * 60
 NIGHT_END_MINS = 6 * 60
 TIME_DURATION_TOLERANCE_MINS = 15
+MIN_GAP_FOR_TRANSFER_MINS = 45
+MIN_GAP_FOR_FREE_TIME_MINS = 120
+MORNING_FILL_THRESHOLD_MINS = 120
+EVENING_FILL_THRESHOLD_MINS = 90
+DEFAULT_TRANSFER_DURATION_MINS = 30
+DEFAULT_FREE_BLOCK_MINS = 120
+DEFAULT_EVENING_REST_MINS = 120
 TIME_PATTERN = re.compile(r"^(?:[01]\d|2[0-3]):[0-5]\d$")
 
 
@@ -38,6 +46,8 @@ class PlanActivity:
     long: float | None
     description: str | None
     order_index: int
+    segment_origin: str = "model"
+    segment_kind: str = "activity"
     source_evidence_ids: list[str] = field(default_factory=list)
     validation_notes: list[str] = field(default_factory=list)
 
@@ -104,6 +114,8 @@ def build_plan_draft(
                 lat=node.lat,
                 long=node.long,
                 description=node.description.strip() if node.description else None,
+                segment_origin=node.segment_origin or "model",
+                segment_kind=node.segment_kind or "activity",
                 order_index=index,
                 source_evidence_ids=_match_evidence_ids(node, evidence),
             )
@@ -141,8 +153,18 @@ def _parse_iso_date(value: str | None) -> date | None:
         return None
 
 
+def _normalize_time_str(value: str) -> str:
+    """Normalize H:MM to HH:MM so the strict pattern accepts LLM output like '8:00'."""
+    if re.fullmatch(r"^\d:[0-5]\d$", value):
+        return f"0{value}"
+    return value
+
+
 def _parse_time_mins(value: str | None) -> int | None:
-    if not value or not TIME_PATTERN.fullmatch(value):
+    if not value:
+        return None
+    value = _normalize_time_str(value.strip())
+    if not TIME_PATTERN.fullmatch(value):
         return None
     hours, minutes = value.split(":")
     return int(hours) * 60 + int(minutes)
@@ -244,6 +266,12 @@ def _normalize_activity_schedule(activity: PlanActivity, warnings: list[str]) ->
             f"Activity '{activity.title}' had invalid date '{activity.date_local}' and it was cleared."
         )
         activity.date_local = None
+
+    # Normalize H:MM → HH:MM in-place so stored values are always zero-padded.
+    if activity.start_time_local:
+        activity.start_time_local = _normalize_time_str(activity.start_time_local.strip())
+    if activity.end_time_local:
+        activity.end_time_local = _normalize_time_str(activity.end_time_local.strip())
 
     start_mins = _parse_time_mins(activity.start_time_local)
     end_mins = _parse_time_mins(activity.end_time_local)
@@ -410,14 +438,14 @@ def _enforce_daily_timeline_consistency(
                     "Start time backfilled during strict timeline validation."
                 )
 
-            if start_mins < DEFAULT_DAY_START_MINS:
+            if start_mins < EARLIEST_ALLOWED_START_MINS:
                 warnings.append(
                     (
-                        f"Activity '{activity.title}' started before day window "
-                        f"and was shifted to {_format_time_mins(DEFAULT_DAY_START_MINS)}."
+                        f"Activity '{activity.title}' started before {_format_time_mins(EARLIEST_ALLOWED_START_MINS)} "
+                        f"and was shifted to {_format_time_mins(EARLIEST_ALLOWED_START_MINS)}."
                     )
                 )
-                start_mins = DEFAULT_DAY_START_MINS
+                start_mins = EARLIEST_ALLOWED_START_MINS
                 activity.start_time_local = _format_time_mins(start_mins)
 
             if start_mins < current_start_mins:
@@ -509,6 +537,294 @@ def _warn_sparse_daily_plan(
     elif avg_per_day < 1.7 and trip_days and trip_days >= 3:
         warnings.append(
             "Plan has low daily density; consider requesting 3-5 activities per day."
+        )
+
+
+def _iter_trip_dates(start_date: date, end_date: date) -> list[str]:
+    dates: list[str] = []
+    current = start_date
+    while current <= end_date:
+        dates.append(current.isoformat())
+        current += timedelta(days=1)
+    return dates
+
+
+def _resolve_day_keys_for_fill(
+    activities: list[PlanActivity],
+    *,
+    start_date: date | None,
+    end_date: date | None,
+) -> list[str]:
+    if start_date and end_date and start_date <= end_date:
+        return _iter_trip_dates(start_date, end_date)
+
+    unique_dates = {
+        activity.date_local
+        for activity in activities
+        if activity.date_local and _parse_iso_date(activity.date_local)
+    }
+    return sorted(unique_dates)
+
+
+def _clean_location_label(value: str) -> str:
+    cleaned = re.sub(
+        r"^(return from|return to|travel from|travel to|transfer from|transfer to|go to|visit)\s+",
+        "",
+        value.strip(),
+        flags=re.IGNORECASE,
+    )
+    cleaned = re.sub(r"\s+", " ", cleaned).strip(" -:,.")
+    return cleaned or value.strip()
+
+
+def _infer_home_base_title(activities: list[PlanActivity]) -> str | None:
+    for activity in sorted(activities, key=lambda item: item.order_index):
+        blob = _activity_blob(activity)
+        if activity.activity_type == "accommodation":
+            return _clean_location_label(activity.title)
+        if any(term in blob for term in ("hotel", "accommodation", "check-in", "hostel")):
+            return _clean_location_label(activity.title)
+    return None
+
+
+def _build_transfer_title(previous_title: str, next_title: str) -> str:
+    prev = _clean_location_label(previous_title)
+    nxt = _clean_location_label(next_title)
+    if prev.lower() == nxt.lower():
+        return f"Transit near {nxt}"
+    return f"Transit: {prev} to {nxt}"
+
+
+def _build_synthetic_activity(
+    *,
+    title: str,
+    activity_type: str,
+    segment_kind: str,
+    date_local: str,
+    start_mins: int,
+    end_mins: int,
+    description: str,
+    order_index: int,
+) -> PlanActivity:
+    normalized_start = max(0, min(start_mins, 23 * 60 + 59))
+    normalized_end = max(normalized_start + MIN_ACTIVITY_DURATION_MINS, end_mins)
+    duration = normalized_end - normalized_start
+    return PlanActivity(
+        title=title,
+        activity_type=activity_type,
+        duration_mins=duration,
+        date_local=date_local,
+        start_time_local=_format_time_mins(normalized_start),
+        end_time_local=_format_time_mins(normalized_end),
+        lat=None,
+        long=None,
+        description=description,
+        segment_origin="synthetic",
+        segment_kind=segment_kind,
+        order_index=order_index,
+        source_evidence_ids=[],
+        validation_notes=[
+            "Auto-generated continuity segment to reduce blank gaps in the daily plan."
+        ],
+    )
+
+
+def _synthesize_daily_completeness_segments(
+    activities: list[PlanActivity],
+    *,
+    start_date: date | None,
+    end_date: date | None,
+    warnings: list[str],
+) -> None:
+    day_keys = _resolve_day_keys_for_fill(
+        activities,
+        start_date=start_date,
+        end_date=end_date,
+    )
+    if not day_keys:
+        return
+
+    by_day: dict[str, list[PlanActivity]] = {}
+    for activity in activities:
+        if activity.date_local and _parse_iso_date(activity.date_local):
+            by_day.setdefault(activity.date_local, []).append(activity)
+
+    home_base = _infer_home_base_title(activities)
+    next_order_index = (
+        max((activity.order_index for activity in activities), default=-1) + 1
+    )
+    synthesized: list[PlanActivity] = []
+
+    def add_segment(
+        *,
+        title: str,
+        activity_type: str,
+        segment_kind: str,
+        day_key: str,
+        start_mins: int,
+        end_mins: int,
+        description: str,
+    ) -> None:
+        nonlocal next_order_index
+        if end_mins - start_mins < MIN_ACTIVITY_DURATION_MINS:
+            return
+        synthesized.append(
+            _build_synthetic_activity(
+                title=title,
+                activity_type=activity_type,
+                segment_kind=segment_kind,
+                date_local=day_key,
+                start_mins=start_mins,
+                end_mins=end_mins,
+                description=description,
+                order_index=next_order_index,
+            )
+        )
+        next_order_index += 1
+
+    for day_key in day_keys:
+        day_items = sorted(
+            by_day.get(day_key, []),
+            key=lambda item: (
+                _parse_time_mins(item.start_time_local) if item.start_time_local else 99_999,
+                item.order_index,
+            ),
+        )
+
+        if not day_items:
+            add_segment(
+                title="Flexible local exploration",
+                activity_type="relaxation",
+                segment_kind="buffer",
+                day_key=day_key,
+                start_mins=10 * 60,
+                end_mins=12 * 60,
+                description=(
+                    "Open block for neighborhood exploration, cafe stops, or spontaneous activities."
+                ),
+            )
+            add_segment(
+                title=f"Evening rest{f' at {home_base}' if home_base else ''}",
+                activity_type="accommodation" if home_base else "relaxation",
+                segment_kind="rest",
+                day_key=day_key,
+                start_mins=18 * 60,
+                end_mins=20 * 60,
+                description="Buffer block to recharge before the next day.",
+            )
+            continue
+
+        first = day_items[0]
+        first_start = _parse_time_mins(first.start_time_local)
+        if first_start is not None:
+            morning_slot_start = DEFAULT_DAY_START_MINS
+            morning_slot_end = first_start - DEFAULT_ACTIVITY_GAP_MINS
+            morning_available = morning_slot_end - morning_slot_start
+            if morning_available >= MORNING_FILL_THRESHOLD_MINS:
+                add_segment(
+                    title="Flexible morning buffer",
+                    activity_type="relaxation",
+                    segment_kind="buffer",
+                    day_key=day_key,
+                    start_mins=morning_slot_start,
+                    end_mins=min(morning_slot_end, morning_slot_start + DEFAULT_FREE_BLOCK_MINS),
+                    description=(
+                        "Optional recovery time, breakfast, and light local exploration before the main plan."
+                    ),
+                )
+
+        for previous, following in zip(day_items, day_items[1:]):
+            previous_end = _parse_time_mins(previous.end_time_local)
+            following_start = _parse_time_mins(following.start_time_local)
+            if previous_end is None or following_start is None:
+                continue
+
+            slot_start = previous_end + DEFAULT_ACTIVITY_GAP_MINS
+            slot_end = following_start - DEFAULT_ACTIVITY_GAP_MINS
+            available = slot_end - slot_start
+            if available < MIN_ACTIVITY_DURATION_MINS:
+                continue
+
+            if available >= MIN_GAP_FOR_TRANSFER_MINS:
+                transfer_end = slot_start + min(DEFAULT_TRANSFER_DURATION_MINS, available)
+                add_segment(
+                    title=_build_transfer_title(previous.title, following.title),
+                    activity_type="transport",
+                    segment_kind="transfer",
+                    day_key=day_key,
+                    start_mins=slot_start,
+                    end_mins=transfer_end,
+                    description="Explicit transit segment inserted to keep the timeline coherent.",
+                )
+                slot_start = transfer_end + DEFAULT_ACTIVITY_GAP_MINS
+                available = slot_end - slot_start
+
+            if available >= MIN_GAP_FOR_FREE_TIME_MINS:
+                add_segment(
+                    title=f"Free time near {following.title}",
+                    activity_type="relaxation",
+                    segment_kind="buffer",
+                    day_key=day_key,
+                    start_mins=slot_start,
+                    end_mins=min(slot_end, slot_start + DEFAULT_FREE_BLOCK_MINS),
+                    description=(
+                        "Open block for snacks, photos, shopping, or short spontaneous stops."
+                    ),
+                )
+
+        last = day_items[-1]
+        last_end = _parse_time_mins(last.end_time_local)
+        if last_end is not None:
+            evening_slot_start = last_end + DEFAULT_ACTIVITY_GAP_MINS
+            evening_slot_end = DEFAULT_DAY_END_MINS
+            evening_available = evening_slot_end - evening_slot_start
+            if evening_available >= EVENING_FILL_THRESHOLD_MINS:
+                cursor = evening_slot_start
+                if (
+                    last.activity_type != "accommodation"
+                    and home_base
+                    and evening_available >= MIN_GAP_FOR_TRANSFER_MINS + MIN_ACTIVITY_DURATION_MINS
+                ):
+                    transfer_duration = min(
+                        DEFAULT_TRANSFER_DURATION_MINS,
+                        evening_slot_end - cursor - MIN_ACTIVITY_DURATION_MINS,
+                    )
+                    if transfer_duration >= MIN_ACTIVITY_DURATION_MINS:
+                        transfer_end = cursor + transfer_duration
+                        add_segment(
+                            title=_build_transfer_title(last.title, home_base),
+                            activity_type="transport",
+                            segment_kind="transfer",
+                            day_key=day_key,
+                            start_mins=cursor,
+                            end_mins=transfer_end,
+                            description=(
+                                "Return segment added so the day ends at accommodation context."
+                            ),
+                        )
+                        cursor = transfer_end + DEFAULT_ACTIVITY_GAP_MINS
+
+                rest_end = min(evening_slot_end, cursor + DEFAULT_EVENING_REST_MINS)
+                if rest_end - cursor >= MIN_ACTIVITY_DURATION_MINS:
+                    add_segment(
+                        title=f"Evening wind-down{f' at {home_base}' if home_base else ''}",
+                        activity_type="accommodation" if home_base else "relaxation",
+                        segment_kind="rest",
+                        day_key=day_key,
+                        start_mins=cursor,
+                        end_mins=rest_end,
+                        description=(
+                            "Reserved downtime for recovery, packing, and preparation for the next day."
+                        ),
+                    )
+
+    if synthesized:
+        activities.extend(synthesized)
+        warnings.append(
+            (
+                f"Inserted {len(synthesized)} auto-generated transition/rest segments "
+                "to improve day completeness."
+            )
         )
 
 
@@ -709,6 +1025,17 @@ def validate_plan_draft(
         directives=directives,
         warnings=warnings,
     )
+    _synthesize_daily_completeness_segments(
+        deduped,
+        start_date=start_date,
+        end_date=end_date,
+        warnings=warnings,
+    )
+    _enforce_daily_timeline_consistency(
+        deduped,
+        directives=directives,
+        warnings=warnings,
+    )
     deduped = _sort_chronologically(deduped, warnings)
     _warn_sparse_daily_plan(
         deduped,
@@ -740,11 +1067,6 @@ def validate_plan_draft(
 def map_plan_draft_to_nodes(plan: PlanDraft) -> list[ItineraryNode]:
     nodes: list[ItineraryNode] = []
     for activity in sorted(plan.activities, key=lambda item: item.order_index):
-        notes = " ".join(activity.validation_notes).strip()
-        description = activity.description or ""
-        if notes:
-            description = f"{description} {notes}".strip()
-
         nodes.append(
             ItineraryNode(
                 title=activity.title,
@@ -755,7 +1077,9 @@ def map_plan_draft_to_nodes(plan: PlanDraft) -> list[ItineraryNode]:
                 end_time_local=activity.end_time_local,
                 lat=activity.lat,
                 long=activity.long,
-                description=description or None,
+                description=activity.description or None,
+                segment_origin=activity.segment_origin,
+                segment_kind=activity.segment_kind,
             )
         )
     return nodes

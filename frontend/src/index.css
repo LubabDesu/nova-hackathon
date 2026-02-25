@@ -1,21 +1,77 @@
 /* NovaSync — Global resets & design tokens */
-@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap");
 
 :root {
-    /* Palette — dark mode */
-    --bg-primary: #0b0f1a;
-    --bg-surface: #111827;
-    --bg-card: rgba(30, 41, 59, 0.55);
-    --border: rgba(148, 163, 184, 0.12);
-    --text-primary: #f1f5f9;
-    --text-secondary: #94a3b8;
-    --accent: #818cf8;
-    --accent-glow: rgba(129, 140, 248, 0.25);
-    --gradient-start: #6366f1;
-    --gradient-end: #a78bfa;
-    --error: #f87171;
+    /* Palette — light mode */
+    --bg-primary: #F4F7FB;
+    --bg-surface: #FFFFFF;
+    --bg-card: #FFFFFF;
+    --border: rgba(15, 23, 42, 0.09);
+    --text-primary: #0F172A;
+    --text-secondary: #64748B;
+    --accent: #0EA5E9;
+    --accent-glow: rgba(14, 165, 233, 0.1);
+    --gradient-start: #0EA5E9;
+    --gradient-end: #6366F1;
+    --error: #EF4444;
     --radius: 14px;
     --radius-sm: 8px;
+    --shadow-xs: 0 1px 3px rgba(15, 23, 42, 0.06), 0 1px 2px rgba(15, 23, 42, 0.04);
+    --shadow-sm: 0 2px 8px rgba(15, 23, 42, 0.08), 0 1px 3px rgba(15, 23, 42, 0.04);
+    --shadow: 0 4px 20px rgba(15, 23, 42, 0.1), 0 2px 6px rgba(15, 23, 42, 0.05);
+    --shadow-lg: 0 8px 32px rgba(15, 23, 42, 0.12);
+
+    /* Semantic colors — override in dark theme */
+    --color-sky-text: #0369A1;
+    --color-indigo-text: #4338CA;
+    --color-indigo: #6366F1;
+    --color-success-text: #065F46;
+    --color-success-bg: rgba(16, 185, 129, 0.12);
+    --color-warn-text: #92400E;
+    --color-warn-bg: rgba(251, 191, 36, 0.15);
+    --color-danger-text: #991B1B;
+    --color-danger-bg: rgba(239, 68, 68, 0.12);
+    --color-muted: #475569;
+    --color-reasoning-text: #1E3A5F;
+    --color-badge-text: #0F172A;
+    --bg-subtle: #F8FAFC;
+    --bg-lighter: #F1F5F9;
+    --border-dashed: rgba(15, 23, 42, 0.15);
+    --header-bg: rgba(244, 247, 251, 0.92);
+}
+
+[data-theme="dark"] {
+    --bg-primary: #0B0F1A;
+    --bg-surface: #111827;
+    --bg-card: rgba(30, 41, 59, 0.6);
+    --border: rgba(148, 163, 184, 0.12);
+    --text-primary: #F1F5F9;
+    --text-secondary: #94A3B8;
+    --accent: #38BDF8;
+    --accent-glow: rgba(56, 189, 248, 0.18);
+    --gradient-start: #38BDF8;
+    --gradient-end: #818CF8;
+    --shadow-xs: 0 1px 3px rgba(0, 0, 0, 0.3);
+    --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.35);
+    --shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+    --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.5);
+
+    --color-sky-text: #38BDF8;
+    --color-indigo-text: #A5B4FC;
+    --color-indigo: #818CF8;
+    --color-success-text: #4ADE80;
+    --color-success-bg: rgba(74, 222, 128, 0.1);
+    --color-warn-text: #FDE68A;
+    --color-warn-bg: rgba(253, 230, 138, 0.1);
+    --color-danger-text: #FCA5A5;
+    --color-danger-bg: rgba(252, 165, 165, 0.1);
+    --color-muted: #94A3B8;
+    --color-reasoning-text: #BFDBFE;
+    --color-badge-text: #0F172A;
+    --bg-subtle: rgba(30, 41, 59, 0.5);
+    --bg-lighter: rgba(30, 41, 59, 0.7);
+    --border-dashed: rgba(148, 163, 184, 0.2);
+    --header-bg: rgba(11, 15, 26, 0.92);
 }
 
 *,
@@ -34,13 +90,14 @@ html {
 
 body {
     font-family:
-        "Inter",
+        "Plus Jakarta Sans",
         system-ui,
         -apple-system,
         sans-serif;
     background: var(--bg-primary);
     color: var(--text-primary);
     min-height: 100vh;
+    transition: background 0.2s ease, color 0.2s ease;
 }
 
 #root {
