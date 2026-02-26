@@ -105,6 +105,7 @@ function emptyProfile(): LifestyleProfile {
         accommodation_style: null,
         pace: null,
         mobility_mode: null,
+        notes: {},
     };
 }
 
@@ -169,9 +170,17 @@ export default function LifestyleModal({ onConfirm, onSkip }: LifestyleModalProp
         if (step > 0) setStep((s) => s - 1);
     }
 
+    function updateNote(value: string) {
+        setProfile((prev) => ({
+            ...prev,
+            notes: { ...(prev.notes ?? {}), [question.id]: value },
+        }));
+    }
+
+    const noteText = (profile.notes?.[question.id] ?? "").trim();
     const canAdvance = question.multi
         ? true  // multi-select always has a "skip this" via empty selection
-        : profile[question.id] !== null && profile[question.id] !== "";
+        : (profile[question.id] !== null && profile[question.id] !== "") || noteText.length > 0;
 
     return (
         <div className="lifestyle-modal-overlay">
@@ -208,6 +217,14 @@ export default function LifestyleModal({ onConfirm, onSkip }: LifestyleModalProp
                 {question.multi && (
                     <p className="lifestyle-modal-hint">Select all that apply</p>
                 )}
+
+                <textarea
+                    className="lifestyle-modal-note"
+                    rows={2}
+                    placeholder="Or add more detail in your own words…"
+                    value={profile.notes?.[question.id] ?? ""}
+                    onChange={(e) => updateNote(e.target.value)}
+                />
 
                 <div className="lifestyle-modal-actions">
                     {step > 0 && (

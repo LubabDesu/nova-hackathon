@@ -99,6 +99,30 @@
     margin: -0.5rem 0 0;
 }
 
+.lifestyle-modal-note {
+    width: 100%;
+    box-sizing: border-box;
+    resize: none;
+    border: 1px solid var(--border, #334155);
+    border-radius: 0.5rem;
+    background: var(--surface-2, #0f172a);
+    color: var(--text-primary, #f1f5f9);
+    font-size: 0.85rem;
+    font-family: inherit;
+    padding: 0.55rem 0.75rem;
+    line-height: 1.5;
+    outline: none;
+    transition: border-color 0.15s;
+}
+
+.lifestyle-modal-note::placeholder {
+    color: var(--text-muted, #64748b);
+}
+
+.lifestyle-modal-note:focus {
+    border-color: var(--accent, #6366f1);
+}
+
 .lifestyle-modal-actions {
     display: flex;
     gap: 0.5rem;

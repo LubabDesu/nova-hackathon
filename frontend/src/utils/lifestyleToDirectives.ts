@@ -69,6 +69,12 @@ export function lifestyleToDirectives(
         mobilityMode = mobilityModeFromFitness;
     }
 
+    // Freetext notes — append as-is to soft preferences
+    for (const text of Object.values(profile.notes ?? {})) {
+        const trimmed = text.trim();
+        if (trimmed) soft.push(trimmed);
+    }
+
     // Deduplicate
     const dedup = (arr: string[]) => [...new Set(arr.filter(Boolean))];
 

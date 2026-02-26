@@ -44,6 +44,7 @@ export interface LifestyleProfile {
     accommodation_style: string | null;
     pace: string | null;
     mobility_mode: string | null;
+    notes?: Record<string, string>;
 }
 
 export interface WorkerReport {
