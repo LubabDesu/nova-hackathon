@@ -265,7 +265,7 @@ def _build_planner_prompt(
         "- Use web-research timing constraints when available.\n"
         "- Use realistic, activity-specific durations — do NOT round everything to 15/30/60 min:\n"
         "  Major temples/shrines: 90-180 min | Scenic hikes: 120-240 min | Full museum: 90-150 min\n"
-        "  Sit-down dining: 60-90 min (never under 45 min) | Street food/café stop: 20-35 min\n"
+        "  Sit-down dining: 60-90 min (never under 45 min) | Street food/café stop: 60-75 min\n"
         "  City transit leg: 20-50 min | Inter-city travel: 60-180 min | Market/shopping: 45-90 min\n"
         "  Hotel check-in/out: 30-45 min | Cultural show/performance: 60-120 min\n"
         "- If evidence or the scaffold specifies an early start (e.g. 06:00 for Fushimi Inari), use that time exactly.\n"
