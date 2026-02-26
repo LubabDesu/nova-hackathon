@@ -19,6 +19,17 @@ DEFAULT_ACTIVITY_TYPE = "sightseeing"
 DEFAULT_ACTIVITY_DURATION_MINS = 90
 DEFAULT_DAY_START_MINS = 9 * 60      # used only when backfilling a MISSING start time
 EARLIEST_ALLOWED_START_MINS = 5 * 60  # hard floor: explicit model times are respected down to 5am
+
+_WAKE_START_MAP = {
+    "early_bird": 7 * 60,   # 07:00
+    "standard":   9 * 60,   # 09:00
+    "late_riser": 10 * 60,  # 10:00
+}
+
+
+def _wake_to_day_start_mins(directives: InputDirectives) -> int:
+    """Return the day-start minute derived from wake_time_pref, falling back to DEFAULT_DAY_START_MINS."""
+    return _WAKE_START_MAP.get(directives.wake_time_pref or "", DEFAULT_DAY_START_MINS)
 DEFAULT_ACTIVITY_GAP_MINS = 30
 DEFAULT_DAY_END_MINS = 22 * 60
 NIGHT_START_MINS = 19 * 60
@@ -306,6 +317,7 @@ def _auto_assign_schedule(
     *,
     start_date: date | None,
     end_date: date | None,
+    directives: InputDirectives,
 ) -> None:
     if not activities:
         return
@@ -326,7 +338,8 @@ def _auto_assign_schedule(
         ]
         current_date = min(date_candidates) if date_candidates else None
 
-    current_start_mins = DEFAULT_DAY_START_MINS
+    day_start_mins = _wake_to_day_start_mins(directives)
+    current_start_mins = day_start_mins
 
     for activity in sorted(activities, key=lambda item: item.order_index):
         parsed_date = _parse_iso_date(activity.date_local)
@@ -356,7 +369,7 @@ def _auto_assign_schedule(
                 if end_date and next_date > end_date:
                     next_date = end_date
                 current_date = next_date
-            current_start_mins = DEFAULT_DAY_START_MINS
+            current_start_mins = day_start_mins
         else:
             current_start_mins = next_start
 
@@ -413,8 +426,9 @@ def _enforce_daily_timeline_consistency(
             continue
         activities_by_date.setdefault(activity.date_local, []).append(activity)
 
+    day_start_mins = _wake_to_day_start_mins(directives)
     for _, daily_activities in sorted(activities_by_date.items()):
-        current_start_mins = DEFAULT_DAY_START_MINS
+        current_start_mins = day_start_mins
         ordered = sorted(
             daily_activities,
             key=lambda item: (
@@ -473,7 +487,7 @@ def _enforce_daily_timeline_consistency(
                 start_mins, end_mins
             ):
                 adjusted_end = min(NIGHT_START_MINS - 1, DEFAULT_DAY_END_MINS)
-                adjusted_start = max(DEFAULT_DAY_START_MINS, adjusted_end - duration)
+                adjusted_start = max(day_start_mins, adjusted_end - duration)
                 if adjusted_end > adjusted_start:
                     start_mins = adjusted_start
                     end_mins = adjusted_end
@@ -634,6 +648,7 @@ def _synthesize_daily_completeness_segments(
     *,
     start_date: date | None,
     end_date: date | None,
+    directives: InputDirectives,
     warnings: list[str],
 ) -> None:
     day_keys = _resolve_day_keys_for_fill(
@@ -717,7 +732,7 @@ def _synthesize_daily_completeness_segments(
         first = day_items[0]
         first_start = _parse_time_mins(first.start_time_local)
         if first_start is not None:
-            morning_slot_start = DEFAULT_DAY_START_MINS
+            morning_slot_start = _wake_to_day_start_mins(directives)
             morning_slot_end = first_start - DEFAULT_ACTIVITY_GAP_MINS
             morning_available = morning_slot_end - morning_slot_start
             if morning_available >= MORNING_FILL_THRESHOLD_MINS:
@@ -1013,7 +1028,7 @@ def validate_plan_draft(
         end_date=end_date,
         warnings=warnings,
     )
-    _auto_assign_schedule(deduped, start_date=start_date, end_date=end_date)
+    _auto_assign_schedule(deduped, start_date=start_date, end_date=end_date, directives=directives)
     _enforce_trip_window_bounds(
         deduped,
         start_date=start_date,
@@ -1029,6 +1044,7 @@ def validate_plan_draft(
         deduped,
         start_date=start_date,
         end_date=end_date,
+        directives=directives,
         warnings=warnings,
     )
     _enforce_daily_timeline_consistency(

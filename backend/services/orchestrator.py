@@ -131,7 +131,7 @@ def _render_lifestyle_section(input_directives: InputDirectives) -> str:
     if input_directives.wake_time_pref:
         wake_map = {
             "early_bird": "early riser (comfortable starting from 07:00)",
-            "standard": "standard wake time (starts from 09:00)",
+            "standard": "standard wake time (no strong preference on start time)",
             "late_riser": "late riser (prefers starting from 10:00-11:00)",
         }
         lines.append(f"Schedule: {wake_map.get(input_directives.wake_time_pref, input_directives.wake_time_pref)}")
