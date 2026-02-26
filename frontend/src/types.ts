@@ -282,6 +282,12 @@ export interface ProcessIdeaDebugResponse extends ProcessIdeaResponse {
                 result_count: number;
                 error?: string | null;
                 citations: string[];
+                snippet_digest?: string;
+                results_preview?: Array<{
+                    url: string;
+                    title: string;
+                    snippet: string;
+                }>;
             }>;
         };
     };

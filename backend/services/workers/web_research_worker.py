@@ -564,6 +564,8 @@ def run_web_research_worker(
             f"{item.get('title', '')} {item.get('snippet', '')}" for item in results
         ).strip()
 
+        snippet_digest = ""
+        results_preview: list[dict[str, str]] = []
         if results:
             snippet_parts: list[str] = []
             for item in results[:3]:
@@ -573,6 +575,11 @@ def run_web_research_worker(
                     snippet_parts.append(f"{title}: {snippet}" if title else snippet)
                 elif title:
                     snippet_parts.append(title)
+                results_preview.append({
+                    "url": item.get("url", ""),
+                    "title": title,
+                    "snippet": snippet[:300],
+                })
             snippet_digest = " | ".join(snippet_parts)[:360].strip()
             summary = (
                 f"Web search '{query}': {snippet_digest}"
@@ -581,12 +588,16 @@ def run_web_research_worker(
             )
             confidence = 0.65
         else:
-            summary = (
-                f"Web research found no results for '{query}'."
-            )
+            summary = f"Web research found no results for '{query}'."
             if error:
                 summary = f"{summary} Error: {error}"
             confidence = 0.25
+            if "duckduckgo" in provider_used:
+                logger.warning(
+                    "DuckDuckGo returned 0 results for query=%r — likely bot detection / CAPTCHA. "
+                    "Set TAVILY_API_KEY or BRAVE_SEARCH_API_KEY in .env to use a real search API.",
+                    query,
+                )
 
         evidence.append(
             EvidenceItem(
@@ -609,6 +620,8 @@ def run_web_research_worker(
                 "result_count": len(results),
                 "error": error,
                 "citations": citations,
+                "snippet_digest": snippet_digest,
+                "results_preview": results_preview,
             }
         )
 

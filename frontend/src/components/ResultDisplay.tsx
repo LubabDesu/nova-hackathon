@@ -612,6 +612,14 @@ export default function ResultDisplay({
                                             {outcome.error && (
                                                 <p className="evidence-summary">error: {outcome.error}</p>
                                             )}
+                                            {outcome.snippet_digest && (
+                                                <p className="evidence-summary">{outcome.snippet_digest}</p>
+                                            )}
+                                            {outcome.result_count === 0 && !outcome.error && (
+                                                <p className="evidence-summary evidence-summary--warn">
+                                                    No results — DuckDuckGo may be blocking the request. Set TAVILY_API_KEY or BRAVE_SEARCH_API_KEY in .env for reliable results.
+                                                </p>
+                                            )}
                                             {outcome.citations.length > 0 && (
                                                 <div className="evidence-citations">
                                                     {outcome.citations.map((citation, citationIndex) => (
