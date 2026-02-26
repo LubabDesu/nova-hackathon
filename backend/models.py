@@ -20,6 +20,12 @@ class InputDirectives(BaseModel):
     mobility_mode: str | None = None
     budget_level: str | None = None
     pace: str | None = None
+    # Lifestyle profile fields (populated by frontend interview)
+    travel_party: list[str] = Field(default_factory=list)   # e.g. ["solo"], ["family_young_kids"]
+    dietary: list[str] = Field(default_factory=list)         # e.g. ["vegetarian", "halal"]
+    wake_time_pref: str | None = None                        # "early_bird" | "standard" | "late_riser"
+    fitness_level: str | None = None                         # "low" | "moderate" | "high"
+    accommodation_style: str | None = None                   # "budget" | "mid_range" | "boutique" | "luxury"
 
 
 # ── Request ─────────────────────────────────────────────────────────────────

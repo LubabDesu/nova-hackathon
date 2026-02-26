@@ -895,6 +895,18 @@ const THINKING_SUBSTAGES = [
         duration: 10000,
     },
     {
+        icon: "🔎",
+        label: "Reviewing the draft plan",
+        detail: "Checking timings, constraints, and completeness",
+        duration: 8000,
+    },
+    {
+        icon: "✍️",
+        label: "Improving the draft plan",
+        detail: "Applying self-review to produce a better itinerary",
+        duration: 9000,
+    },
+    {
         icon: "✨",
         label: "Almost there",
         detail: "Validating, finalising, and preparing your plan",

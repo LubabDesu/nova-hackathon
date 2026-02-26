@@ -9,10 +9,16 @@ import {
 } from "@countrystatecity/countries";
 import IdeaInput from "./components/IdeaInput";
 import ResultDisplay from "./components/ResultDisplay";
+import LifestyleModal, {
+    loadLifestyleProfile,
+    saveLifestyleProfile,
+} from "./components/LifestyleModal";
+import { lifestyleToDirectives } from "./utils/lifestyleToDirectives";
 import { debugUrlScraper, processIdeaStream } from "./services/api";
 import type {
     InputDirectives,
     ItineraryNode,
+    LifestyleProfile,
     ProcessIdeaDebugResponse,
     UrlScraperDebugResponse,
 } from "./types";
@@ -120,6 +126,16 @@ const LOADING_PHASES: LoadingPhase[] = [
         defaultDetail: "Normalizing web facts and extracting scheduling constraints.",
     },
     {
+        stage: "planner_critique",
+        label: "Reviewing the draft plan",
+        defaultDetail: "Checking timings, constraints, and completeness.",
+    },
+    {
+        stage: "planner_revise",
+        label: "Improving the draft plan",
+        defaultDetail: "Applying self-review to produce a better itinerary.",
+    },
+    {
         stage: "insert_nodes",
         label: "Finalizing itinerary",
         defaultDetail: "Preparing the final plan payload and syncing results.",
@@ -188,6 +204,12 @@ export default function App() {
     const [debugPayload, setDebugPayload] =
         useState<ProcessIdeaDebugResponse | null>(null);
     const [plannerReasoning, setPlannerReasoning] = useState<string | null>(null);
+    const [plannerCritique, setPlannerCritique] = useState<string | null>(null);
+    const [lifestyleProfile, setLifestyleProfile] = useState<LifestyleProfile | null>(
+        () => loadLifestyleProfile(),
+    );
+    const [showLifestyleModal, setShowLifestyleModal] = useState(false);
+    const pendingIdeaRef = useRef<string | null>(null);
     const [urlScraperLoading, setUrlScraperLoading] = useState(false);
     const [urlScraperError, setUrlScraperError] = useState<string | null>(null);
     const [urlScraperResult, setUrlScraperResult] =
@@ -344,7 +366,15 @@ export default function App() {
         setStateNameInput(matchedState.name);
     };
 
-    const handleSubmit = async (idea: string) => {
+    const handleSubmit = async (idea: string, profileOverride?: LifestyleProfile | null) => {
+        // If no saved lifestyle profile, show modal first (unless explicitly skipped)
+        const resolvedProfile = profileOverride !== undefined ? profileOverride : lifestyleProfile;
+        if (resolvedProfile === null && profileOverride === undefined) {
+            pendingIdeaRef.current = idea;
+            setShowLifestyleModal(true);
+            return;
+        }
+
         setLoading(true);
         setError(null);
         setNodes([]);
@@ -355,16 +385,22 @@ export default function App() {
         }
         setDebugPayload(null);
         setPlannerReasoning(null);
+        setPlannerCritique(null);
         setLoadingPhaseIndex(0);
         setLoadingPhaseLabel(LOADING_PHASES[0].label);
         setLoadingPhaseDetail(LOADING_PHASES[0].defaultDetail);
 
-        const inputDirectives: InputDirectives = {
+        let inputDirectives: InputDirectives = {
             hard_constraints: parseLines(hardConstraintsInput),
             soft_preferences: parseLines(softPreferencesInput),
             must_include: parseLines(mustIncludeInput),
             avoid: parseLines(avoidInput),
         };
+
+        // Merge lifestyle profile into directives
+        if (resolvedProfile) {
+            inputDirectives = lifestyleToDirectives(resolvedProfile, inputDirectives);
+        }
 
         let resolvedTripDays: number | undefined;
         if (tripWindowMode === "fixed") {
@@ -516,6 +552,30 @@ export default function App() {
                                 );
                             }
                         }
+
+                        if (event === "planner_critique") {
+                            const critiqueText =
+                                typeof data.text === "string" ? data.text.trim() : "";
+                            if (critiqueText.length > 0) {
+                                setPlannerCritique(critiqueText);
+                                const idx = stageIndexMap.get("planner_critique");
+                                if (typeof idx === "number") setLoadingPhaseIndex(idx);
+                                setLoadingPhaseLabel("Reviewing the draft plan");
+                                setLoadingPhaseDetail("Self-review complete.");
+                            }
+                        }
+
+                        if (event === "planner_revised_reasoning") {
+                            const revisedText =
+                                typeof data.text === "string" ? data.text.trim() : "";
+                            if (revisedText.length > 0) {
+                                setPlannerReasoning(revisedText);
+                                const idx = stageIndexMap.get("planner_revise");
+                                if (typeof idx === "number") setLoadingPhaseIndex(idx);
+                                setLoadingPhaseLabel("Improved draft ready");
+                                setLoadingPhaseDetail("Applied self-review to itinerary.");
+                            }
+                        }
                     },
                 },
             );
@@ -615,8 +675,46 @@ export default function App() {
         }
     };
 
+    const handleLifestyleConfirm = (profile: LifestyleProfile) => {
+        saveLifestyleProfile(profile);
+        setLifestyleProfile(profile);
+        setShowLifestyleModal(false);
+        const idea = pendingIdeaRef.current;
+        pendingIdeaRef.current = null;
+        if (idea !== null) {
+            void handleSubmit(idea, profile);
+        }
+    };
+
+    const handleLifestyleSkip = () => {
+        setShowLifestyleModal(false);
+        const idea = pendingIdeaRef.current;
+        pendingIdeaRef.current = null;
+        // Pass empty object sentinel (not null) so we skip the modal next time
+        const skippedProfile: LifestyleProfile = {
+            wake_time_pref: null,
+            travel_party: [],
+            dietary: [],
+            fitness_level: null,
+            accommodation_style: null,
+            pace: null,
+            mobility_mode: null,
+        };
+        saveLifestyleProfile(skippedProfile);
+        setLifestyleProfile(skippedProfile);
+        if (idea !== null) {
+            void handleSubmit(idea, skippedProfile);
+        }
+    };
+
     return (
         <div className="app-shell">
+            {showLifestyleModal && (
+                <LifestyleModal
+                    onConfirm={handleLifestyleConfirm}
+                    onSkip={handleLifestyleSkip}
+                />
+            )}
             <header className="app-header">
                 <div className="logo">
                     <span className="logo-icon">◆</span> NovaSync

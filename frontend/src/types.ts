@@ -28,6 +28,22 @@ export interface InputDirectives {
     mobility_mode?: string | null;
     budget_level?: string | null;
     pace?: string | null;
+    // Lifestyle profile fields
+    travel_party?: string[];
+    dietary?: string[];
+    wake_time_pref?: string | null;
+    fitness_level?: string | null;
+    accommodation_style?: string | null;
+}
+
+export interface LifestyleProfile {
+    wake_time_pref: string | null;
+    travel_party: string[];
+    dietary: string[];
+    fitness_level: string | null;
+    accommodation_style: string | null;
+    pace: string | null;
+    mobility_mode: string | null;
 }
 
 export interface WorkerReport {

@@ -1,5 +1,144 @@
 /* NovaSync — App layout & component styles */
 
+/* ── Lifestyle modal ──────────────────────────────────────────────────────── */
+.lifestyle-modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(4px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+}
+
+.lifestyle-modal {
+    background: var(--surface, #1e293b);
+    border: 1px solid var(--border, rgba(255,255,255,0.1));
+    border-radius: 16px;
+    padding: 2rem;
+    width: min(480px, 92vw);
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+}
+
+.lifestyle-modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.lifestyle-modal-title {
+    font-size: 0.85rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-muted, #94a3b8);
+}
+
+.lifestyle-modal-step {
+    font-size: 0.8rem;
+    color: var(--text-muted, #94a3b8);
+}
+
+.lifestyle-modal-progress {
+    height: 3px;
+    background: var(--border, rgba(255,255,255,0.1));
+    border-radius: 2px;
+    overflow: hidden;
+}
+
+.lifestyle-modal-progress-bar {
+    height: 100%;
+    background: var(--accent, #6ee7b7);
+    border-radius: 2px;
+    transition: width 0.3s ease;
+}
+
+.lifestyle-modal-question {
+    font-size: 1.15rem;
+    font-weight: 600;
+    color: var(--text, #f1f5f9);
+    margin: 0;
+    line-height: 1.4;
+}
+
+.lifestyle-modal-options {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+.lifestyle-option-pill {
+    padding: 0.45rem 1rem;
+    border-radius: 999px;
+    border: 1px solid var(--border, rgba(255,255,255,0.12));
+    background: transparent;
+    color: var(--text, #f1f5f9);
+    font-size: 0.88rem;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.lifestyle-option-pill:hover {
+    border-color: var(--accent, #6ee7b7);
+    color: var(--accent, #6ee7b7);
+}
+
+.lifestyle-option-pill.is-selected {
+    background: var(--accent, #6ee7b7);
+    border-color: var(--accent, #6ee7b7);
+    color: #0f172a;
+    font-weight: 600;
+}
+
+.lifestyle-modal-hint {
+    font-size: 0.78rem;
+    color: var(--text-muted, #94a3b8);
+    margin: -0.5rem 0 0;
+}
+
+.lifestyle-modal-actions {
+    display: flex;
+    gap: 0.5rem;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+}
+
+.lifestyle-btn {
+    padding: 0.55rem 1.1rem;
+    border-radius: 8px;
+    border: 1px solid var(--border, rgba(255,255,255,0.12));
+    font-size: 0.88rem;
+    cursor: pointer;
+    transition: background 0.15s, opacity 0.15s;
+}
+
+.lifestyle-btn--back {
+    background: transparent;
+    color: var(--text-muted, #94a3b8);
+    margin-right: auto;
+}
+
+.lifestyle-btn--skip {
+    background: transparent;
+    color: var(--text-muted, #94a3b8);
+}
+
+.lifestyle-btn--next {
+    background: var(--accent, #6ee7b7);
+    border-color: var(--accent, #6ee7b7);
+    color: #0f172a;
+    font-weight: 600;
+}
+
+.lifestyle-btn--next.is-disabled,
+.lifestyle-btn--next:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
 /* ── Map-reduce trace panel ───────────────────────────────────────────────── */
 .mr-trace {
     background: rgba(15, 23, 42, 0.03);
