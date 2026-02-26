@@ -288,10 +288,16 @@ def _post_openrouter(
     client: httpx.Client,
     payload: dict[str, Any],
     headers: dict[str, str],
+    purpose: str = "unknown",
 ) -> dict[str, Any]:
+    model = payload.get("model", "unknown")
+    logger.info("→ OpenRouter POST | purpose=%-22s | model=%s", purpose, model)
     resp = client.post(OPENROUTER_URL, json=payload, headers=headers)
     resp.raise_for_status()
-    return resp.json()
+    data = resp.json()
+    response_model = data.get("model") or model
+    logger.info("← OpenRouter OK  | purpose=%-22s | model=%s", purpose, response_model)
+    return data
 
 
 def _extract_nodes_from_response(data: dict[str, Any]) -> list[ItineraryNode]:
@@ -617,8 +623,7 @@ def extract_itinerary(
                     force_tool_choice=force_tool_choice,
                 )
                 try:
-                    data = _post_openrouter(client=client, payload=payload, headers=headers)
-                    logger.info("OpenRouter response model: %s", data.get("model"))
+                    data = _post_openrouter(client=client, payload=payload, headers=headers, purpose="itinerary_extraction")
                     return _extract_nodes_from_response(data)
                 except httpx.HTTPStatusError as exc:
                     detail = exc.response.text[:500]
@@ -728,7 +733,7 @@ def build_planning_scaffold(
                     payload["temperature"] = 0.2
 
                 try:
-                    data = _post_openrouter(client=client, payload=payload, headers=headers)
+                    data = _post_openrouter(client=client, payload=payload, headers=headers, purpose="scaffold")
                     raw_response_text = _message_content_to_text(data)
                     candidate = _sanitize_planning_scaffold(raw_response_text)
                     attempt["status"] = "ok"
@@ -900,7 +905,7 @@ def critique_planning_scaffold(
                 "temperature": 0.1,
             }
             try:
-                data = _post_openrouter(client=client, payload=payload, headers=headers)
+                data = _post_openrouter(client=client, payload=payload, headers=headers, purpose="critique")
                 raw_text = _message_content_to_text(data)
                 candidate = _sanitize_planning_scaffold(raw_text)
                 attempt["status"] = "ok"
@@ -1019,7 +1024,7 @@ def revise_planning_scaffold(
                 "temperature": 0.2,
             }
             try:
-                data = _post_openrouter(client=client, payload=payload, headers=headers)
+                data = _post_openrouter(client=client, payload=payload, headers=headers, purpose="revise")
                 raw_text = _message_content_to_text(data)
                 candidate = _sanitize_planning_scaffold(raw_text)
                 attempt["status"] = "ok"
@@ -1155,7 +1160,7 @@ def build_web_queries(
                     payload["temperature"] = 0.1
 
                 try:
-                    data = _post_openrouter(client=client, payload=payload, headers=headers)
+                    data = _post_openrouter(client=client, payload=payload, headers=headers, purpose="query_builder")
                     raw_text = _message_content_to_text(data)
                     parsed_json = _extract_first_json_object(raw_text)
                     raw_queries = parsed_json.get("queries", [])
@@ -1350,11 +1355,7 @@ def extract_media_context(
                 }
 
             try:
-                data = _post_openrouter(client=client, payload=payload, headers=headers)
-                logger.info(
-                    "OpenRouter media-context response model: %s",
-                    data.get("model"),
-                )
+                data = _post_openrouter(client=client, payload=payload, headers=headers, purpose="media_context")
                 arguments = _extract_tool_arguments(
                     data,
                     tool_name="extract_media_context",
