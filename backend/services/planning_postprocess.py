@@ -381,6 +381,7 @@ def _enforce_trip_window_bounds(
     end_date: date | None,
     warnings: list[str],
 ) -> None:
+    
     if not start_date and not end_date:
         return
 
@@ -462,6 +463,19 @@ def _enforce_daily_timeline_consistency(
                 start_mins = EARLIEST_ALLOWED_START_MINS
                 activity.start_time_local = _format_time_mins(start_mins)
 
+            # Drop activities that overflow past the day-end window.
+            # The extraction model sometimes stacks too many activities onto one date,
+            # pushing start times past 22:00.  The clamp below (end > day-end) cannot
+            # rescue these because clipped_end < start_mins, so they silently survive
+            # as 23:59–23:59 zero-duration sentinels.  Dropping them is safer.
+            if start_mins >= DEFAULT_DAY_END_MINS:
+                warnings.append(
+                    f"Activity '{activity.title}' was scheduled past "
+                    f"{_format_time_mins(DEFAULT_DAY_END_MINS)} "
+                    f"({_format_time_mins(start_mins)}) and was dropped to prevent midnight overflow."
+                )
+                continue
+
             if start_mins < current_start_mins:
                 warnings.append(
                     (
@@ -514,7 +528,8 @@ def _enforce_daily_timeline_consistency(
                         )
                     )
 
-            current_start_mins = end_mins + DEFAULT_ACTIVITY_GAP_MINS
+            # Cap the cursor so one long activity can't push everything else past day-end.
+            current_start_mins = min(end_mins + DEFAULT_ACTIVITY_GAP_MINS, DEFAULT_DAY_END_MINS)
 
 
 def _warn_sparse_daily_plan(
