@@ -233,7 +233,7 @@ def _build_planner_prompt(
     scaffold_section = ""
     if planning_scaffold:
         scaffold_section = (
-            "Draft itinerary scaffold (model-generated natural language):\n"
+            "Approved itinerary plan — follow activity order, timing, and structure exactly:\n"
             f"{_truncate_text(planning_scaffold, 2600)}\n\n"
         )
 
@@ -270,8 +270,8 @@ def _build_planner_prompt(
         "  Hotel check-in/out: 30-45 min | Cultural show/performance: 60-120 min\n"
         "- If evidence or the scaffold specifies an early start (e.g. 06:00 for Fushimi Inari), use that time exactly.\n"
         "- Prefer logically coherent sequencing.\n"
-        "- If a draft scaffold is provided, treat it as a starting point and improve it where needed.\n"
-        "- If scaffold content conflicts with directives/evidence, correct or discard the conflicting parts.\n"
+        "- If an approved plan is provided, reproduce its activity sequence, start times, end times, and durations exactly — do NOT substitute round-hour alternatives.\n"
+        "- Only deviate from the approved plan if doing so is required to satisfy a hard constraint or avoid directive. Do not deviate for stylistic or 'improvement' reasons.\n"
         "- If evidence conflicts, prioritize explicit user directives."
     )
 
