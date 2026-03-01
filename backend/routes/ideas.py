@@ -20,16 +20,22 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, ValidationError
 
 from models import (
+    ExtractRequest,
     InputDirectives,
     ItineraryNode,
     ProcessIdeaRequest,
     ProcessIdeaResponse,
+    ReviseRequest,
 )
-from services.openrouter import MediaInput
+from services.openrouter import MediaInput, revise_scaffold_with_feedback
 from services.orchestrator import (
+    ScaffoldResult,
+    orchestrate_extraction,
     orchestrate_itinerary_planning,
+    orchestrate_scaffold,
     worker_reports_as_dicts,
 )
+from services.session_cache import PlanSession, delete_session, get_session, put_session
 from services.workers.url_worker import run_url_context_worker
 from services.supabase_client import create_trip, insert_nodes
 from services.evidence_builder import build_initial_evidence
@@ -401,13 +407,16 @@ async def process_idea(
         )
 
         # 3. Persist to Supabase
-        await _run_blocking_stage(
+        saved_rows = await _run_blocking_stage(
             stage_name="insert_nodes",
             timeout_seconds=DB_TIMEOUT_SECONDS,
             fn=insert_nodes,
             trip_id=trip_id,
             nodes=nodes,
         )
+        id_map = {r["title"]: r["id"] for r in saved_rows}
+        for node in nodes:
+            node.id = id_map.get(node.title)
 
         response_payload = ProcessIdeaResponse(
             trip_id=trip_id,
@@ -670,13 +679,16 @@ async def process_idea_stream(
                 },
             )
             insert_started = time.perf_counter()
-            await _run_blocking_stage(
+            saved_rows = await _run_blocking_stage(
                 stage_name="insert_nodes",
                 timeout_seconds=DB_TIMEOUT_SECONDS,
                 fn=insert_nodes,
                 trip_id=trip_id_value,
                 nodes=nodes,
             )
+            id_map = {r["title"]: r["id"] for r in saved_rows}
+            for node in nodes:
+                node.id = id_map.get(node.title)
             yield emit(
                 "stage_done",
                 {
@@ -727,6 +739,398 @@ async def process_idea_stream(
                     "message": str(exc),
                 },
             )
+
+    return StreamingResponse(
+        stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+# ── Human-in-the-loop scaffold review endpoints ───────────────────────────────
+
+@router.post("/ideas/plan")
+async def ideas_plan(
+    idea: str | None = Form(default=None),
+    trip_location: str | None = Form(default=None),
+    start_date: str | None = Form(default=None),
+    end_date: str | None = Form(default=None),
+    trip_window_mode: str | None = Form(default=None),
+    trip_days: int | None = Form(default=None),
+    timezone: str | None = Form(default=None),
+    links: str | None = Form(default=None),
+    input_directives: str | None = Form(default=None),
+    files: list[UploadFile] | None = File(default=None),
+):
+    """
+    Always-fresh scaffold generation endpoint (SSE).
+    Runs workers + scaffold + critique/revise, caches result, emits scaffold_ready.
+    Never reads an existing session_id — always creates a fresh one.
+    """
+
+    async def stream() -> AsyncGenerator[str, None]:
+        request_id = str(uuid4())[:8]
+        total_started = time.perf_counter()
+
+        def emit(event_name: str, payload: dict[str, Any]) -> str:
+            return _sse_event(event_name, {"request_id": request_id, **payload})
+
+        try:
+            yield emit("accepted", {"stages": ["prepare_media", "build_scaffold"]})
+
+            uploaded_files = files or []
+            idea_text = (idea or "").strip()
+            if not idea_text:
+                raise HTTPException(status_code=422, detail="`idea` must not be empty.")
+
+            parsed_links = _parse_links_form_field(links)
+            parsed_directives = _parse_input_directives_form_field(input_directives)
+            normalized_links = _normalize_links(parsed_links)
+            body = ProcessIdeaRequest(
+                idea=idea_text,
+                trip_location=(trip_location or "").strip() or None,
+                start_date=start_date,
+                end_date=end_date,
+                trip_window_mode=(trip_window_mode or "").strip() or "fixed",
+                trip_days=trip_days,
+                timezone=(timezone or "").strip() or None,
+                links=normalized_links,
+                input_directives=parsed_directives,
+            )
+
+            yield emit(
+                "stage_start",
+                {
+                    "stage": "prepare_media",
+                    "label": "Curating evidence",
+                    "detail": "Preparing uploads, links, and directives.",
+                },
+            )
+            media_started = time.perf_counter()
+            media_inputs = await _prepare_media_inputs(uploaded_files)
+            initial_evidence = build_initial_evidence(
+                idea_text=idea_text,
+                trip_location=body.trip_location,
+                start_date=body.start_date,
+                end_date=body.end_date,
+                timezone=body.timezone,
+                links=body.links,
+                media_inputs=media_inputs,
+                input_directives=body.input_directives,
+            )
+            yield emit(
+                "stage_done",
+                {
+                    "stage": "prepare_media",
+                    "elapsed_ms": (time.perf_counter() - media_started) * 1000.0,
+                    "evidence_count": len(initial_evidence),
+                },
+            )
+
+            yield emit(
+                "stage_start",
+                {
+                    "stage": "build_scaffold",
+                    "label": "Building draft plan",
+                    "detail": "Running evidence workers, web research, and scaffold generation.",
+                },
+            )
+            scaffold_started = time.perf_counter()
+            scaffold_result: ScaffoldResult = await _run_blocking_stage(
+                stage_name="orchestrate_scaffold",
+                timeout_seconds=ORCHESTRATION_TIMEOUT_SECONDS,
+                fn=orchestrate_scaffold,
+                idea_text=idea_text,
+                trip_location=body.trip_location,
+                start_date=body.start_date,
+                end_date=body.end_date,
+                timezone=body.timezone,
+                links=body.links,
+                media_inputs=media_inputs,
+                input_directives=body.input_directives,
+                initial_evidence=initial_evidence,
+            )
+            yield emit(
+                "stage_done",
+                {
+                    "stage": "build_scaffold",
+                    "elapsed_ms": (time.perf_counter() - scaffold_started) * 1000.0,
+                },
+            )
+
+            session_id = str(uuid4())
+            put_session(PlanSession(
+                session_id=session_id,
+                evidence=scaffold_result.evidence,
+                request_snapshot={
+                    "trip_location": body.trip_location,
+                    "start_date": str(body.start_date) if body.start_date else None,
+                    "end_date": str(body.end_date) if body.end_date else None,
+                    "timezone": body.timezone,
+                    "input_directives": body.input_directives.model_dump(mode="json"),
+                },
+                scaffold_text=scaffold_result.scaffold_text,
+                idea_text=idea_text,
+                revision_count=0,
+            ))
+
+            yield emit(
+                "scaffold_ready",
+                {
+                    "session_id": session_id,
+                    "scaffold_text": scaffold_result.scaffold_text,
+                    "revision_count": 0,
+                    "max_revisions": 1,
+                },
+            )
+            yield emit("done", {"elapsed_ms": (time.perf_counter() - total_started) * 1000.0})
+
+        except HTTPException as exc:
+            yield emit("error", {"status_code": exc.status_code, "message": str(exc.detail)})
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("ideas/plan SSE failed")
+            yield emit("error", {"status_code": 500, "message": str(exc)})
+
+    return StreamingResponse(
+        stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@router.post("/ideas/revise")
+async def ideas_revise(body: ReviseRequest):
+    """
+    User-feedback scaffold revision endpoint (plain JSON, not SSE).
+    Accepts user feedback, runs a fast LLM revision, updates and returns the session.
+    Returns 404 if session is missing/expired, 409 if max revisions exceeded.
+    """
+    session = get_session(body.session_id)
+    if session is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Session not found or expired. Please start a new plan.",
+        )
+
+    if session.revision_count >= 1:
+        raise HTTPException(
+            status_code=409,
+            detail="max_revisions_reached",
+        )
+
+    snapshot = session.request_snapshot
+    revised_text, _debug = await asyncio.to_thread(
+        revise_scaffold_with_feedback,
+        original_scaffold=body.scaffold_text,
+        user_feedback=body.user_feedback,
+        idea_text=session.idea_text,
+        input_directives=None,
+        start_date=snapshot.get("start_date"),
+        end_date=snapshot.get("end_date"),
+    )
+
+    if not revised_text:
+        # Fail open: return original scaffold unchanged
+        revised_text = body.scaffold_text
+
+    session.scaffold_text = revised_text
+    session.revision_count += 1
+    put_session(session)
+
+    return {"scaffold_text": revised_text, "revision_count": session.revision_count}
+
+
+@router.post("/ideas/extract")
+async def ideas_extract(body: ExtractRequest):
+    """
+    Final extraction endpoint (SSE).
+    Takes approved scaffold + session_id, runs extraction, streams node batches.
+    Deletes session from cache after successful extraction.
+    """
+
+    async def stream() -> AsyncGenerator[str, None]:
+        request_id = str(uuid4())[:8]
+        total_started = time.perf_counter()
+
+        def emit(event_name: str, payload: dict[str, Any]) -> str:
+            return _sse_event(event_name, {"request_id": request_id, **payload})
+
+        try:
+            session = get_session(body.session_id)
+            if session is None:
+                yield emit("error", {
+                    "status_code": 404,
+                    "message": "Session not found or expired. Please start a new plan.",
+                })
+                return
+
+            yield emit("accepted", {"stages": ["create_trip", "extract_itinerary", "insert_nodes"]})
+
+            snapshot = session.request_snapshot
+            input_directives_data = snapshot.get("input_directives", {})
+            if isinstance(input_directives_data, dict):
+                from pydantic import ValidationError as _VE
+                try:
+                    resolved_directives = InputDirectives.model_validate(input_directives_data)
+                except _VE:
+                    resolved_directives = InputDirectives()
+            else:
+                resolved_directives = InputDirectives()
+
+            yield emit(
+                "stage_start",
+                {
+                    "stage": "create_trip",
+                    "label": "Creating trip session",
+                    "detail": "Allocating trip record before extraction.",
+                },
+            )
+            create_started = time.perf_counter()
+            trip = await _run_blocking_stage(
+                stage_name="create_trip",
+                timeout_seconds=DB_TIMEOUT_SECONDS,
+                fn=create_trip,
+                name="Untitled Trip",
+            )
+            trip_id_value = trip["id"]
+            yield emit(
+                "stage_done",
+                {
+                    "stage": "create_trip",
+                    "elapsed_ms": (time.perf_counter() - create_started) * 1000.0,
+                },
+            )
+
+            yield emit(
+                "stage_start",
+                {
+                    "stage": "extract_itinerary",
+                    "label": "Generating itinerary",
+                    "detail": "Extracting structured plan from approved scaffold.",
+                },
+            )
+            extract_started = time.perf_counter()
+
+            from datetime import date as _date
+            start_date_parsed: _date | None = None
+            end_date_parsed: _date | None = None
+            raw_start = snapshot.get("start_date")
+            raw_end = snapshot.get("end_date")
+            if raw_start:
+                try:
+                    start_date_parsed = _date.fromisoformat(str(raw_start))
+                except ValueError:
+                    pass
+            if raw_end:
+                try:
+                    end_date_parsed = _date.fromisoformat(str(raw_end))
+                except ValueError:
+                    pass
+
+            orchestration = await _run_blocking_stage(
+                stage_name="orchestrate_extraction",
+                timeout_seconds=ORCHESTRATION_TIMEOUT_SECONDS,
+                fn=orchestrate_extraction,
+                approved_scaffold=body.approved_scaffold,
+                evidence=session.evidence,
+                idea_text=session.idea_text,
+                trip_location=snapshot.get("trip_location"),
+                start_date=start_date_parsed,
+                end_date=end_date_parsed,
+                timezone=snapshot.get("timezone"),
+                input_directives=resolved_directives,
+            )
+            nodes = orchestration.nodes
+            yield emit(
+                "stage_done",
+                {
+                    "stage": "extract_itinerary",
+                    "elapsed_ms": (time.perf_counter() - extract_started) * 1000.0,
+                    "node_count": len(nodes),
+                },
+            )
+
+            day_batches = _build_node_day_batches(nodes)
+            total_batches = len(day_batches)
+            streamed_node_count = 0
+            for sequence, batch in enumerate(day_batches, start=1):
+                batch_nodes = batch["nodes"]
+                streamed_node_count += len(batch_nodes)
+                yield emit(
+                    "node_batch",
+                    {
+                        "sequence": sequence,
+                        "total_batches": total_batches,
+                        "day": batch["day"],
+                        "batch_count": len(batch_nodes),
+                        "streamed_node_count": streamed_node_count,
+                        "total_nodes": len(nodes),
+                        "nodes": batch_nodes,
+                    },
+                )
+
+            yield emit(
+                "stage_start",
+                {
+                    "stage": "insert_nodes",
+                    "label": "Finalizing itinerary",
+                    "detail": "Persisting planned nodes.",
+                },
+            )
+            insert_started = time.perf_counter()
+            saved_rows = await _run_blocking_stage(
+                stage_name="insert_nodes",
+                timeout_seconds=DB_TIMEOUT_SECONDS,
+                fn=insert_nodes,
+                trip_id=trip_id_value,
+                nodes=nodes,
+            )
+            id_map = {r["title"]: r["id"] for r in saved_rows}
+            for node in nodes:
+                node.id = id_map.get(node.title)
+            yield emit(
+                "stage_done",
+                {
+                    "stage": "insert_nodes",
+                    "elapsed_ms": (time.perf_counter() - insert_started) * 1000.0,
+                },
+            )
+
+            delete_session(body.session_id)
+
+            response_payload = ProcessIdeaResponse(
+                trip_id=trip_id_value,
+                nodes=nodes,
+                planner_scaffold_text=body.approved_scaffold,
+            )
+            final_payload: dict[str, Any] = response_payload.model_dump(mode="json")
+            if body.debug:
+                logger.info(
+                    "Planner debug trace:\n%s",
+                    json.dumps(orchestration.debug_trace or {}, indent=2),
+                )
+                final_payload |= {
+                    "worker_reports": worker_reports_as_dicts(orchestration.worker_reports),
+                    "validation_report": orchestration.validation_report,
+                    "evidence": [item.model_dump(mode="json") for item in orchestration.evidence],
+                    "debug_trace": orchestration.debug_trace or {},
+                }
+            yield emit("final", final_payload)
+            yield emit("done", {"elapsed_ms": (time.perf_counter() - total_started) * 1000.0})
+
+        except HTTPException as exc:
+            yield emit("error", {"status_code": exc.status_code, "message": str(exc.detail)})
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("ideas/extract SSE failed")
+            yield emit("error", {"status_code": 500, "message": str(exc)})
 
     return StreamingResponse(
         stream(),

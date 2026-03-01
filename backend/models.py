@@ -102,6 +102,7 @@ class ProcessIdeaRequest(BaseModel):
 
 # ── Domain ──────────────────────────────────────────────────────────────────
 class ItineraryNode(BaseModel):
+    id: str | None = None          # DB-assigned UUID
     title: str
     activity_type: str
     duration_mins: int | None = None
@@ -120,6 +121,19 @@ class ProcessIdeaResponse(BaseModel):
     trip_id: str
     nodes: list[ItineraryNode]
     planner_scaffold_text: str | None = None
+
+
+# ── Human-in-the-loop scaffold review request models ────────────────────────
+class ReviseRequest(BaseModel):
+    session_id: str
+    scaffold_text: str        # current scaffold shown to user
+    user_feedback: str        # what they want changed
+
+
+class ExtractRequest(BaseModel):
+    session_id: str
+    approved_scaffold: str
+    debug: bool = False
 
 
 # ── Internal Orchestration Models ───────────────────────────────────────────

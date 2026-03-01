@@ -1,6 +1,7 @@
 // NovaSync — shared TypeScript types
 
 export interface ItineraryNode {
+    id?: string | null;            // DB-assigned UUID
     title: string;
     activity_type: string;
     duration_mins: number | null;
@@ -296,3 +297,11 @@ export interface ProcessIdeaDebugResponse extends ProcessIdeaResponse {
 export type ProcessIdeaApiResponse =
     | ProcessIdeaResponse
     | ProcessIdeaDebugResponse;
+
+// ── Human-in-the-loop scaffold review ────────────────────────────────────────
+export interface ScaffoldReadyEvent {
+    session_id: string;
+    scaffold_text: string;
+    revision_count: number;
+    max_revisions: number;
+}
