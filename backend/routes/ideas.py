@@ -414,9 +414,8 @@ async def process_idea(
             trip_id=trip_id,
             nodes=nodes,
         )
-        id_map = {r["title"]: r["id"] for r in saved_rows}
-        for node in nodes:
-            node.id = id_map.get(node.title)
+        for node, row in zip(nodes, saved_rows):
+            node.id = row["id"]
 
         response_payload = ProcessIdeaResponse(
             trip_id=trip_id,
@@ -651,6 +650,7 @@ async def process_idea_stream(
                     },
                 )
 
+            # node_batch events carry id=None (DB ids are populated after insert_nodes below)
             day_batches = _build_node_day_batches(nodes)
             total_batches = len(day_batches)
             streamed_node_count = 0
@@ -686,9 +686,8 @@ async def process_idea_stream(
                 trip_id=trip_id_value,
                 nodes=nodes,
             )
-            id_map = {r["title"]: r["id"] for r in saved_rows}
-            for node in nodes:
-                node.id = id_map.get(node.title)
+            for node, row in zip(nodes, saved_rows):
+                node.id = row["id"]
             yield emit(
                 "stage_done",
                 {
@@ -1058,6 +1057,7 @@ async def ideas_extract(body: ExtractRequest):
                 },
             )
 
+            # node_batch events carry id=None (DB ids are populated after insert_nodes below)
             day_batches = _build_node_day_batches(nodes)
             total_batches = len(day_batches)
             streamed_node_count = 0
@@ -1093,9 +1093,8 @@ async def ideas_extract(body: ExtractRequest):
                 trip_id=trip_id_value,
                 nodes=nodes,
             )
-            id_map = {r["title"]: r["id"] for r in saved_rows}
-            for node in nodes:
-                node.id = id_map.get(node.title)
+            for node, row in zip(nodes, saved_rows):
+                node.id = row["id"]
             yield emit(
                 "stage_done",
                 {
