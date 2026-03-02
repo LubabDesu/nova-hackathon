@@ -20,11 +20,13 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, ValidationError
 
 from models import (
+    BulkUpdateNodesRequest,
     ExtractRequest,
     InputDirectives,
     ItineraryNode,
     ProcessIdeaRequest,
     ProcessIdeaResponse,
+    ReoptimizeTimingsRequest,
     ReviseRequest,
 )
 from services.openrouter import MediaInput, revise_scaffold_with_feedback
@@ -37,7 +39,7 @@ from services.orchestrator import (
 )
 from services.session_cache import PlanSession, delete_session, get_session, put_session
 from services.workers.url_worker import run_url_context_worker
-from services.supabase_client import create_trip, insert_nodes
+from services.supabase_client import create_trip, insert_nodes, update_nodes
 from services.evidence_builder import build_initial_evidence
 
 logger = logging.getLogger(__name__)
@@ -1140,3 +1142,67 @@ async def ideas_extract(body: ExtractRequest):
             "X-Accel-Buffering": "no",
         },
     )
+
+
+@router.patch("/trips/{trip_id}/nodes")
+async def bulk_update_nodes(trip_id: str, body: BulkUpdateNodesRequest):
+    """Bulk-upsert edited itinerary nodes for a trip."""
+    try:
+        saved = await asyncio.get_event_loop().run_in_executor(
+            None, update_nodes, body.nodes
+        )
+        return JSONResponse({"updated": len(saved), "nodes": saved})
+    except Exception as exc:
+        logger.exception("bulk_update_nodes failed for trip %s", trip_id)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.post("/trips/{trip_id}/reoptimize-timings")
+async def reoptimize_timings(trip_id: str, body: ReoptimizeTimingsRequest):
+    """Use a lightweight model to assign plausible times to activities."""
+    import os, httpx, json as _json
+
+    api_key = os.getenv("OPENROUTER_API_KEY", "")
+    if not api_key:
+        raise HTTPException(status_code=500, detail="OPENROUTER_API_KEY not set")
+
+    model = os.getenv("OPENROUTER_URL_SUMMARY_MODEL", "liquid/lfm-2.5-1.2b-instruct:free")
+
+    day_lines = []
+    for day in body.days:
+        acts = "; ".join(
+            f"{a.get('title','?')} ({a.get('activity_type','?')}, {a.get('duration_mins',60)}min)"
+            for a in day.activities
+        )
+        day_lines.append(f"Date {day.date}: {acts}")
+
+    prompt = (
+        f"Day starts at {body.wake_time}. Assign realistic start times to these activities.\n"
+        "Rules: sightseeing/culture in morning, food at meal times (lunch 12:00, dinner 18:30), "
+        "accommodation/rest in evening. No gaps between consecutive activities.\n"
+        "Return ONLY valid JSON, no prose:\n"
+        '{"days":[{"date":"YYYY-MM-DD","activities":[{"title":"...","start_time_local":"HH:MM","end_time_local":"HH:MM"}]}]}\n\n'
+        + "\n".join(day_lines)
+    )
+
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        resp = await client.post(
+            "https://openrouter.ai/api/v1/chat/completions",
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json={"model": model, "messages": [{"role": "user", "content": prompt}]},
+        )
+        resp.raise_for_status()
+        content = resp.json()["choices"][0]["message"]["content"].strip()
+
+    # Strip markdown fences if present
+    if content.startswith("```"):
+        content = content.split("```")[1]
+        if content.startswith("json"):
+            content = content[4:]
+
+    try:
+        result = _json.loads(content)
+    except _json.JSONDecodeError as exc:
+        raise HTTPException(status_code=502, detail=f"Model returned invalid JSON: {content[:200]}") from exc
+
+    return JSONResponse(result)

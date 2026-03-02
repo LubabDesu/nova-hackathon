@@ -179,3 +179,17 @@ class EvidenceItem(BaseModel):
     citations: list[str] = Field(default_factory=list)
     raw_artifact_ref: str | None = None
     debug: EvidenceDebug | None = None
+
+
+class BulkUpdateNodesRequest(BaseModel):
+    nodes: list[ItineraryNode]
+
+
+class ReoptimizeDay(BaseModel):
+    date: str
+    activities: list[dict]  # [{title, activity_type, duration_mins}]
+
+
+class ReoptimizeTimingsRequest(BaseModel):
+    days: list[ReoptimizeDay]
+    wake_time: str = "09:00"
