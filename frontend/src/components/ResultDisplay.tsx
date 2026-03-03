@@ -2,10 +2,30 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ItineraryNode, ProcessIdeaDebugResponse, WorkerReport } from "../types";
+import {
+    DndContext,
+    closestCenter,
+    KeyboardSensor,
+    PointerSensor,
+    useSensor,
+    useSensors,
+    type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+    SortableContext,
+    sortableKeyboardCoordinates,
+    useSortable,
+    verticalListSortingStrategy,
+    arrayMove,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import { repackDay, validatePlan, isFillerNode } from "../utils/itineraryUtils";
+import { saveEditedNodes, reoptimizeTimings } from "../services/api";
 
 interface ResultDisplayProps {
     nodes: ItineraryNode[];
     tripId: string | null;
+    onNodesChange?: (nodes: ItineraryNode[]) => void;
     plannerReasoning: string | null;
     error: string | null;
     debugPayload: ProcessIdeaDebugResponse | null;
@@ -31,6 +51,7 @@ const TYPE_COLORS: Record<string, string> = {
 export default function ResultDisplay({
     nodes,
     tripId,
+    onNodesChange,
     plannerReasoning,
     error,
     debugPayload,
@@ -43,6 +64,24 @@ export default function ResultDisplay({
     const [activeDebugTab, setActiveDebugTab] = useState<"workers" | "evidence" | "validation" | "trace">(
         "workers",
     );
+
+    const [isEditing, setIsEditing] = useState(false);
+    const [editedNodes, setEditedNodes] = useState<ItineraryNode[]>([]);
+    const [isSaving, setIsSaving] = useState(false);
+    const [isReoptimizing, setIsReoptimizing] = useState(false);
+    const [saveError, setSaveError] = useState<string | null>(null);
+
+    function enterEditMode() {
+        setEditedNodes(nodes.filter((n) => !isFillerNode(n)));
+        setIsEditing(true);
+        setSaveError(null);
+    }
+
+    function cancelEditMode() {
+        setIsEditing(false);
+        setEditedNodes([]);
+        setSaveError(null);
+    }
 
     const sortedNodes = [...nodes].sort((a, b) => {
         const dateA = a.date_local ?? "9999-12-31";
@@ -105,6 +144,125 @@ export default function ResultDisplay({
             };
         });
     }, [sortedNodes]);
+
+    const editedDayGroups = useMemo(() => {
+        if (!isEditing) return [];
+        const buckets = new Map<string, ItineraryNode[]>();
+        for (const node of editedNodes) {
+            const key = node.date_local ?? "unscheduled";
+            const bucket = buckets.get(key) ?? [];
+            bucket.push(node);
+            buckets.set(key, bucket);
+        }
+        const sortedKeys = [...buckets.keys()].sort((a, b) => {
+            if (a === "unscheduled") return 1;
+            if (b === "unscheduled") return -1;
+            return a.localeCompare(b);
+        });
+        return sortedKeys.map((key) => ({ key, items: buckets.get(key) ?? [] }));
+    }, [isEditing, editedNodes]);
+
+    const sensors = useSensors(
+        useSensor(PointerSensor),
+        useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+    );
+
+    function handleDragEnd(event: DragEndEvent) {
+        const { active, over } = event;
+        if (!over || active.id === over.id) return;
+
+        const [activeDate, activeIdxStr] = String(active.id).split("::");
+        const [overDate, overIdxStr] = String(over.id).split("::");
+        const activeIdx = parseInt(activeIdxStr, 10);
+        const overIdx = parseInt(overIdxStr, 10);
+
+        setEditedNodes((prev) => {
+            const byDay = new Map<string, ItineraryNode[]>();
+            for (const n of prev) {
+                const k = n.date_local ?? "unscheduled";
+                const b = byDay.get(k) ?? [];
+                b.push(n);
+                byDay.set(k, b);
+            }
+
+            if (activeDate === overDate) {
+                const dayNodes = byDay.get(activeDate) ?? [];
+                const reordered = arrayMove(dayNodes, activeIdx, overIdx);
+                byDay.set(activeDate, repackDay(reordered));
+            } else {
+                const srcNodes = byDay.get(activeDate) ?? [];
+                const [moved] = srcNodes.splice(activeIdx, 1);
+                byDay.set(activeDate, repackDay(srcNodes));
+
+                const dstNodes = byDay.get(overDate) ?? [];
+                const movedToDst = { ...moved, date_local: overDate };
+                dstNodes.splice(overIdx, 0, movedToDst);
+                byDay.set(overDate, repackDay(dstNodes));
+            }
+
+            const sortedKeys = [...byDay.keys()].sort((a, b) => a.localeCompare(b));
+            return sortedKeys.flatMap((k) => byDay.get(k) ?? []);
+        });
+    }
+
+    async function handleSave() {
+        if (!tripId) return;
+        const warnings = validatePlan(editedDayGroups);
+        if (warnings.length > 0) {
+            console.warn("Plan warnings:", warnings);
+        }
+        setIsSaving(true);
+        setSaveError(null);
+        try {
+            await saveEditedNodes(tripId, editedNodes);
+            onNodesChange?.(editedNodes);
+            setIsEditing(false);
+            setEditedNodes([]);
+        } catch (err) {
+            setSaveError(err instanceof Error ? err.message : "Save failed");
+        } finally {
+            setIsSaving(false);
+        }
+    }
+
+    async function handleReoptimize() {
+        if (!tripId) return;
+        setIsReoptimizing(true);
+        setSaveError(null);
+        try {
+            const dayPayload = editedDayGroups.map((g) => ({
+                date: g.key,
+                activities: g.items.map((n) => ({
+                    title: n.title,
+                    activity_type: n.activity_type,
+                    duration_mins: n.duration_mins,
+                })),
+            }));
+            const result = await reoptimizeTimings(tripId, dayPayload);
+
+            const timeMap = new Map<string, { start: string; end: string }>();
+            for (const day of result.days) {
+                for (const act of day.activities) {
+                    timeMap.set(act.title, {
+                        start: act.start_time_local,
+                        end: act.end_time_local,
+                    });
+                }
+            }
+            setEditedNodes((prev) =>
+                prev.map((n) => {
+                    const t = timeMap.get(n.title);
+                    return t
+                        ? { ...n, start_time_local: t.start, end_time_local: t.end }
+                        : n;
+                }),
+            );
+        } catch (err) {
+            setSaveError(err instanceof Error ? err.message : "Re-optimize failed");
+        } finally {
+            setIsReoptimizing(false);
+        }
+    }
 
     const workerReports = debugPayload?.worker_reports ?? [];
     const evidence = debugPayload?.evidence ?? [];
@@ -705,12 +863,58 @@ export default function ResultDisplay({
                 <h2 className="zone-title">
                     <span className="zone-icon">📋</span> Extracted Itinerary
                 </h2>
-                {tripId && (
-                    <span className="trip-badge">
-                        Trip: {tripId.slice(0, 8)}…
-                    </span>
-                )}
+                <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+                    {isEditing && (
+                        <button
+                            type="button"
+                            className="scaffold-btn scaffold-btn-revise"
+                            onClick={handleReoptimize}
+                            disabled={isReoptimizing || isSaving}
+                        >
+                            {isReoptimizing ? "Optimizing…" : "Re-optimize timings"}
+                        </button>
+                    )}
+                    {nodes.length > 0 && tripId && (
+                        isEditing ? (
+                            <>
+                                <button
+                                    type="button"
+                                    className="scaffold-btn scaffold-btn-revise"
+                                    onClick={cancelEditMode}
+                                    disabled={isSaving}
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    type="button"
+                                    className="scaffold-btn scaffold-btn-approve"
+                                    onClick={handleSave}
+                                    disabled={isSaving}
+                                >
+                                    {isSaving ? "Saving…" : "Save Changes"}
+                                </button>
+                            </>
+                        ) : (
+                            <button
+                                type="button"
+                                className="scaffold-btn scaffold-btn-revise"
+                                onClick={enterEditMode}
+                                disabled={loading}
+                            >
+                                Edit Plan
+                            </button>
+                        )
+                    )}
+                    {tripId && (
+                        <span className="trip-badge">Trip: {tripId.slice(0, 8)}…</span>
+                    )}
+                </div>
             </div>
+            {saveError && (
+                <p style={{ color: "#dc2626", fontSize: "0.8rem", marginBottom: "0.5rem" }}>
+                    {saveError}
+                </p>
+            )}
             {reasoningSection}
             <div className="day-groups">
                 {dayGroups.map((group, dayIndex) => (
@@ -854,21 +1058,6 @@ function formatDateLabel(value: string): string {
         day: "numeric",
         year: "numeric",
     }).format(parsed);
-}
-
-function isFillerNode(node: ItineraryNode): boolean {
-    if (node.segment_origin === "synthetic") {
-        return true;
-    }
-    const blob = `${node.title} ${node.description ?? ""}`.toLowerCase();
-    return (
-        blob.includes("auto-generated")
-        || blob.includes("free time")
-        || blob.includes("wind-down")
-        || blob.includes("flexible")
-        || blob.includes("travel from")
-        || blob.includes("return from")
-    );
 }
 
 const THINKING_SUBSTAGES = [
