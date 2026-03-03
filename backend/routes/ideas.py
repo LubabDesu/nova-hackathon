@@ -1148,9 +1148,7 @@ async def ideas_extract(body: ExtractRequest):
 async def bulk_update_nodes(trip_id: str, body: BulkUpdateNodesRequest):
     """Bulk-upsert edited itinerary nodes for a trip."""
     try:
-        saved = await asyncio.get_event_loop().run_in_executor(
-            None, update_nodes, body.nodes
-        )
+        saved = await asyncio.to_thread(update_nodes, body.nodes)
         return JSONResponse({"updated": len(saved), "nodes": saved})
     except Exception as exc:
         logger.exception("bulk_update_nodes failed for trip %s", trip_id)
@@ -1186,13 +1184,24 @@ async def reoptimize_timings(trip_id: str, body: ReoptimizeTimingsRequest):
     )
 
     async with httpx.AsyncClient(timeout=20.0) as client:
-        resp = await client.post(
-            "https://openrouter.ai/api/v1/chat/completions",
-            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-            json={"model": model, "messages": [{"role": "user", "content": prompt}]},
-        )
-        resp.raise_for_status()
-        content = resp.json()["choices"][0]["message"]["content"].strip()
+        try:
+            resp = await client.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                json={"model": model, "messages": [{"role": "user", "content": prompt}]},
+            )
+            resp.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            raise HTTPException(
+                status_code=502,
+                detail=f"OpenRouter returned {exc.response.status_code}",
+            ) from exc
+        except httpx.RequestError as exc:
+            raise HTTPException(
+                status_code=502,
+                detail=f"OpenRouter network error: {exc}",
+            ) from exc
+    content = resp.json()["choices"][0]["message"]["content"].strip()
 
     # Strip markdown fences if present
     if content.startswith("```"):
