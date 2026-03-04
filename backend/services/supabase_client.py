@@ -93,13 +93,14 @@ def insert_nodes(trip_id: str, nodes: list[ItineraryNode]) -> list[dict]:
         return legacy_result.data
 
 
-def update_nodes(nodes: list[ItineraryNode]) -> list[dict]:
+def update_nodes(nodes: list[ItineraryNode], trip_id: str) -> list[dict]:
     """Bulk-upsert itinerary nodes by id. Only updates editable fields."""
     if not nodes:
         return []
     rows = [
         {
             "id": n.id,
+            "trip_id": trip_id,
             "title": n.title,
             "description": n.description,
             "duration_mins": n.duration_mins,
