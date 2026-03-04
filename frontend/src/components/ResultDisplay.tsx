@@ -190,11 +190,11 @@ export default function ResultDisplay({
                 const reordered = arrayMove(dayNodes, activeIdx, overIdx);
                 byDay.set(activeDate, repackDay(reordered));
             } else {
-                const srcNodes = byDay.get(activeDate) ?? [];
+                const srcNodes = [...(byDay.get(activeDate) ?? [])];
                 const [moved] = srcNodes.splice(activeIdx, 1);
                 byDay.set(activeDate, repackDay(srcNodes));
 
-                const dstNodes = byDay.get(overDate) ?? [];
+                const dstNodes = [...(byDay.get(overDate) ?? [])];
                 const movedToDst = { ...moved, date_local: overDate };
                 dstNodes.splice(overIdx, 0, movedToDst);
                 byDay.set(overDate, repackDay(dstNodes));
