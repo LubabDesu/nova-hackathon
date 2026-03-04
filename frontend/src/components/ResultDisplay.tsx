@@ -1,6 +1,7 @@
 // NovaSync — Zone 2: Result Display
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties } from "react";
 import type { ItineraryNode, ProcessIdeaDebugResponse, WorkerReport } from "../types";
 import {
     DndContext,
@@ -47,6 +48,103 @@ const TYPE_COLORS: Record<string, string> = {
     shopping: "#a5f3fc",
     relaxation: "#d9f99d",
 };
+
+function SortableCard({
+    id,
+    node,
+    onNodeChange,
+}: {
+    id: string;
+    node: ItineraryNode;
+    onNodeChange: (updated: ItineraryNode) => void;
+}) {
+    const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+        useSortable({ id });
+
+    const style: CSSProperties = {
+        transform: CSS.Transform.toString(transform),
+        transition,
+        opacity: isDragging ? 0.5 : 1,
+    };
+
+    return (
+        <div
+            ref={setNodeRef}
+            style={style}
+            className="node-card day-node-card"
+        >
+            {/* Drag handle */}
+            <div
+                {...attributes}
+                {...listeners}
+                style={{ cursor: "grab", fontSize: "0.75rem", color: "#94a3b8", marginBottom: "0.4rem", userSelect: "none" }}
+            >
+                ⠿ drag to reorder
+            </div>
+
+            {/* Time row */}
+            <div className="schedule-row" style={{ gap: "0.5rem", flexWrap: "wrap" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "0.3rem" }}>
+                    <label style={{ fontSize: "0.72rem", color: "#64748b" }}>Start</label>
+                    <input
+                        type="time"
+                        value={node.start_time_local ?? ""}
+                        onChange={(e) => onNodeChange({ ...node, start_time_local: e.target.value })}
+                        style={{ fontSize: "0.78rem", border: "1px solid #e2e8f0", borderRadius: "4px", padding: "0.1rem 0.3rem" }}
+                    />
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: "0.3rem" }}>
+                    <label style={{ fontSize: "0.72rem", color: "#64748b" }}>Duration</label>
+                    <input
+                        type="number"
+                        min={5}
+                        step={5}
+                        value={node.duration_mins ?? ""}
+                        onChange={(e) => onNodeChange({ ...node, duration_mins: parseInt(e.target.value, 10) || null })}
+                        style={{ width: "4rem", fontSize: "0.78rem", border: "1px solid #e2e8f0", borderRadius: "4px", padding: "0.1rem 0.3rem" }}
+                    />
+                    <span style={{ fontSize: "0.72rem", color: "#64748b" }}>min</span>
+                </div>
+            </div>
+
+            {/* Editable title */}
+            <input
+                type="text"
+                value={node.title}
+                onChange={(e) => onNodeChange({ ...node, title: e.target.value })}
+                style={{
+                    width: "100%",
+                    fontWeight: 600,
+                    fontSize: "1rem",
+                    border: "1px solid #e2e8f0",
+                    borderRadius: "6px",
+                    padding: "0.3rem 0.5rem",
+                    marginBottom: "0.3rem",
+                    fontFamily: "inherit",
+                    boxSizing: "border-box",
+                }}
+            />
+
+            {/* Editable description */}
+            <textarea
+                value={node.description ?? ""}
+                onChange={(e) => onNodeChange({ ...node, description: e.target.value })}
+                rows={2}
+                style={{
+                    width: "100%",
+                    fontSize: "0.85rem",
+                    color: "#475569",
+                    border: "1px solid #e2e8f0",
+                    borderRadius: "6px",
+                    padding: "0.3rem 0.5rem",
+                    fontFamily: "inherit",
+                    resize: "vertical",
+                    boxSizing: "border-box",
+                }}
+            />
+        </div>
+    );
+}
 
 export default function ResultDisplay({
     nodes,
@@ -262,6 +360,27 @@ export default function ResultDisplay({
         } finally {
             setIsReoptimizing(false);
         }
+    }
+
+    function updateEditedNode(updated: ItineraryNode, dayKey: string, indexInDay: number) {
+        setEditedNodes((prev) => {
+            const byDay = new Map<string, ItineraryNode[]>();
+            for (const n of prev) {
+                const k = n.date_local ?? "unscheduled";
+                const b = byDay.get(k) ?? [];
+                b.push(n);
+                byDay.set(k, b);
+            }
+            const dayNodes = [...(byDay.get(dayKey) ?? [])];
+            dayNodes[indexInDay] = updated;
+            // Repack from the changed node onward, anchoring its start time
+            const before = dayNodes.slice(0, indexInDay);
+            const from = dayNodes.slice(indexInDay);
+            byDay.set(dayKey, [...before, ...repackDay(from)]);
+
+            const sortedKeys = [...byDay.keys()].sort((a, b) => a.localeCompare(b));
+            return sortedKeys.flatMap((k) => byDay.get(k) ?? []);
+        });
     }
 
     const workerReports = debugPayload?.worker_reports ?? [];
@@ -916,79 +1035,114 @@ export default function ResultDisplay({
                 </p>
             )}
             {reasoningSection}
-            <div className="day-groups">
-                {dayGroups.map((group, dayIndex) => (
-                    <section className="day-group" key={group.key}>
-                        <header className="day-group-header">
-                            <div>
-                                <p className="day-group-kicker">Day {dayIndex + 1}</p>
-                                <h3 className="day-group-title">{group.label}</h3>
-                                <p className="day-group-meta">
-                                    {group.items.length} activities
-                                    {group.totalDuration > 0
-                                        ? ` • ${group.totalDuration} min planned`
-                                        : " • duration TBD"}
-                                </p>
-                            </div>
-                            <span
-                                className={`day-group-window ${!group.earliest && !group.latest ? "is-unscheduled" : ""}`}
-                            >
-                                {group.earliest || group.latest
-                                    ? `${group.earliest ?? "??:??"} - ${group.latest ?? "??:??"}`
-                                    : "No fixed times"}
-                            </span>
-                        </header>
-
-                        <div className="nodes-grid day-nodes-grid">
-                            {group.items.map((node, index) => (
-                                <div
-                                    className={`node-card day-node-card ${isFillerNode(node) ? "is-filler-node" : ""}`}
-                                    key={`${group.key}-${node.title}-${index}`}
-                                >
-                                    <div className="schedule-row">
-                                        <span className="schedule-time">
-                                            {node.start_time_local || node.end_time_local
-                                                ? `${node.start_time_local ?? "??:??"} - ${node.end_time_local ?? "??:??"}`
-                                                : "Flexible timing"}
-                                        </span>
-                                    </div>
-                                    <div className="node-card-header">
-                                        <span
-                                            className="activity-badge"
-                                            style={{
-                                                backgroundColor:
-                                                    TYPE_COLORS[node.activity_type] ??
-                                                    "#94a3b8",
-                                            }}
-                                        >
-                                            {node.activity_type}
-                                        </span>
-                                        {node.segment_origin === "synthetic" && (
-                                            <span className="synthetic-pill">
-                                                Auto-filled {node.segment_kind ?? "segment"}
-                                            </span>
-                                        )}
-                                        {node.duration_mins && (
-                                            <span className="duration-pill">
-                                                ⏱ {node.duration_mins} min
-                                            </span>
-                                        )}
-                                    </div>
-                                    <h3 className="node-title">{node.title}</h3>
-                                    {node.description && (
-                                        <p className="node-desc">{node.description}</p>
-                                    )}
-                                    {node.lat != null && node.long != null && (
-                                        <span className="coords">
-                                            📍 {node.lat.toFixed(4)}, {node.long.toFixed(4)}
-                                        </span>
-                                    )}
+            {isEditing ? (
+                <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+                    <div className="day-groups">
+                        {editedDayGroups.map((group, dayIndex) => {
+                            const ids = group.items.map((_, i) => `${group.key}::${i}`);
+                            return (
+                                <section className="day-group" key={group.key}>
+                                    <header className="day-group-header">
+                                        <div>
+                                            <p className="day-group-kicker">Day {dayIndex + 1}</p>
+                                            <h3 className="day-group-title">{group.key}</h3>
+                                            <p className="day-group-meta">{group.items.length} activities</p>
+                                        </div>
+                                    </header>
+                                    <SortableContext items={ids} strategy={verticalListSortingStrategy}>
+                                        <div className="nodes-grid day-nodes-grid">
+                                            {group.items.map((node, i) => (
+                                                <SortableCard
+                                                    key={`${group.key}-${i}`}
+                                                    id={`${group.key}::${i}`}
+                                                    node={node}
+                                                    onNodeChange={(updated) =>
+                                                        updateEditedNode(updated, group.key, i)
+                                                    }
+                                                />
+                                            ))}
+                                        </div>
+                                    </SortableContext>
+                                </section>
+                            );
+                        })}
+                    </div>
+                </DndContext>
+            ) : (
+                <div className="day-groups">
+                    {dayGroups.map((group, dayIndex) => (
+                        <section className="day-group" key={group.key}>
+                            <header className="day-group-header">
+                                <div>
+                                    <p className="day-group-kicker">Day {dayIndex + 1}</p>
+                                    <h3 className="day-group-title">{group.label}</h3>
+                                    <p className="day-group-meta">
+                                        {group.items.length} activities
+                                        {group.totalDuration > 0
+                                            ? ` • ${group.totalDuration} min planned`
+                                            : " • duration TBD"}
+                                    </p>
                                 </div>
-                            ))}
-                        </div>
-                    </section>
-                ))}
-            </div>
+                                <span
+                                    className={`day-group-window ${!group.earliest && !group.latest ? "is-unscheduled" : ""}`}
+                                >
+                                    {group.earliest || group.latest
+                                        ? `${group.earliest ?? "??:??"} - ${group.latest ?? "??:??"}`
+                                        : "No fixed times"}
+                                </span>
+                            </header>
+
+                            <div className="nodes-grid day-nodes-grid">
+                                {group.items.map((node, index) => (
+                                    <div
+                                        className={`node-card day-node-card ${isFillerNode(node) ? "is-filler-node" : ""}`}
+                                        key={`${group.key}-${node.title}-${index}`}
+                                    >
+                                        <div className="schedule-row">
+                                            <span className="schedule-time">
+                                                {node.start_time_local || node.end_time_local
+                                                    ? `${node.start_time_local ?? "??:??"} - ${node.end_time_local ?? "??:??"}`
+                                                    : "Flexible timing"}
+                                            </span>
+                                        </div>
+                                        <div className="node-card-header">
+                                            <span
+                                                className="activity-badge"
+                                                style={{
+                                                    backgroundColor:
+                                                        TYPE_COLORS[node.activity_type] ??
+                                                        "#94a3b8",
+                                                }}
+                                            >
+                                                {node.activity_type}
+                                            </span>
+                                            {node.segment_origin === "synthetic" && (
+                                                <span className="synthetic-pill">
+                                                    Auto-filled {node.segment_kind ?? "segment"}
+                                                </span>
+                                            )}
+                                            {node.duration_mins && (
+                                                <span className="duration-pill">
+                                                    ⏱ {node.duration_mins} min
+                                                </span>
+                                            )}
+                                        </div>
+                                        <h3 className="node-title">{node.title}</h3>
+                                        {node.description && (
+                                            <p className="node-desc">{node.description}</p>
+                                        )}
+                                        {node.lat != null && node.long != null && (
+                                            <span className="coords">
+                                                📍 {node.lat.toFixed(4)}, {node.long.toFixed(4)}
+                                            </span>
+                                        )}
+                                    </div>
+                                ))}
+                            </div>
+                        </section>
+                    ))}
+                </div>
+            )}
             {debugSection}
         </div>
     );
