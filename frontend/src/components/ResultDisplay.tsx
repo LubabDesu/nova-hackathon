@@ -10,7 +10,9 @@ import {
     PointerSensor,
     useSensor,
     useSensors,
+    DragOverlay,
     type DragEndEvent,
+    type DragStartEvent,
 } from "@dnd-kit/core";
 import {
     SortableContext,
@@ -64,7 +66,9 @@ function SortableCard({
     const style: CSSProperties = {
         transform: CSS.Transform.toString(transform),
         transition,
-        opacity: isDragging ? 0.5 : 1,
+        // When dragging: show an empty "ghost slot" — just an outline
+        opacity: isDragging ? 0 : 1,
+        boxShadow: isDragging ? "none" : undefined,
     };
 
     return (
@@ -72,10 +76,10 @@ function SortableCard({
             ref={setNodeRef}
             style={style}
             className="node-card day-node-card"
+            {...attributes}
         >
             {/* Drag handle */}
             <div
-                {...attributes}
                 {...listeners}
                 style={{ cursor: "grab", fontSize: "0.75rem", color: "#94a3b8", marginBottom: "0.4rem", userSelect: "none" }}
             >
@@ -168,6 +172,11 @@ export default function ResultDisplay({
     const [isSaving, setIsSaving] = useState(false);
     const [isReoptimizing, setIsReoptimizing] = useState(false);
     const [saveError, setSaveError] = useState<string | null>(null);
+    const [activeDragId, setActiveDragId] = useState<string | null>(null);
+
+    function handleDragStart(event: DragStartEvent) {
+        setActiveDragId(String(event.active.id));
+    }
 
     function enterEditMode() {
         setEditedNodes(nodes.filter((n) => !isFillerNode(n)));
@@ -1036,7 +1045,12 @@ export default function ResultDisplay({
             )}
             {reasoningSection}
             {isEditing ? (
-                <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+                <DndContext
+                    sensors={sensors}
+                    collisionDetection={closestCenter}
+                    onDragStart={handleDragStart}
+                    onDragEnd={(e) => { handleDragEnd(e); setActiveDragId(null); }}
+                >
                     <div className="day-groups">
                         {editedDayGroups.map((group, dayIndex) => {
                             const ids = group.items.map((_, i) => `${group.key}::${i}`);
@@ -1067,6 +1081,37 @@ export default function ResultDisplay({
                             );
                         })}
                     </div>
+                    <DragOverlay dropAnimation={null}>
+                        {activeDragId ? (() => {
+                            const [date, idxStr] = activeDragId.split("::");
+                            const idx = parseInt(idxStr, 10);
+                            const group = editedDayGroups.find((g) => g.key === date);
+                            const node = group?.items[idx];
+                            return node ? (
+                                <div
+                                    className="node-card day-node-card"
+                                    style={{
+                                        boxShadow: "0 16px 40px rgba(14, 165, 233, 0.3)",
+                                        border: "2px solid #0ea5e9",
+                                        transform: "rotate(1.5deg) scale(1.02)",
+                                        cursor: "grabbing",
+                                        background: "#f0f9ff",
+                                    }}
+                                >
+                                    <div style={{ fontSize: "0.72rem", color: "#0ea5e9", marginBottom: "0.25rem", fontWeight: 600 }}>
+                                        ⠿ Moving…
+                                    </div>
+                                    <div style={{ fontWeight: 600, fontSize: "0.95rem", color: "#0f172a" }}>
+                                        {node.title}
+                                    </div>
+                                    <div style={{ fontSize: "0.78rem", color: "#64748b", marginTop: "0.2rem" }}>
+                                        {node.start_time_local} – {node.end_time_local}
+                                        {node.duration_mins ? ` · ${node.duration_mins}min` : ""}
+                                    </div>
+                                </div>
+                            ) : null;
+                        })() : null}
+                    </DragOverlay>
                 </DndContext>
             ) : (
                 <div className="day-groups">
