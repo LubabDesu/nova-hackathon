@@ -18,41 +18,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-        // Detect if the current URL carries OAuth tokens (implicit flow hash or PKCE code).
-        // If so, Supabase needs time to exchange them — don't flip loading=false on
-        // the initial null-session event or ProtectedRoute will navigate away and
-        // destroy the hash before the exchange completes.
-        const isOAuthCallback =
-            window.location.hash.includes("access_token") ||
-            window.location.search.includes("code=");
-
-        const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+        // getSession() establishes the session on first load (reads from localStorage).
+        // The OAuth hash exchange is handled by the dedicated /auth/callback page.
+        supabase.auth.getSession().then(({ data: { session } }) => {
             setSession(session);
             setUser(session?.user ?? null);
-
-            if (isOAuthCallback && event === "INITIAL_SESSION" && !session) {
-                // Hash/code not yet exchanged — stay in loading state
-                return;
-            }
             setLoading(false);
         });
 
-        // Safety net: if OAuth exchange never completes, stop loading after 5 s
-        let timeout: ReturnType<typeof setTimeout> | undefined;
-        if (isOAuthCallback) {
-            timeout = setTimeout(() => setLoading(false), 5000);
-        }
+        const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+            setSession(session);
+            setUser(session?.user ?? null);
+        });
 
-        return () => {
-            subscription.unsubscribe();
-            if (timeout) clearTimeout(timeout);
-        };
+        return () => subscription.unsubscribe();
     }, []);
 
     const signInWithGoogle = async () => {
         await supabase.auth.signInWithOAuth({
             provider: "google",
-            options: { redirectTo: `${window.location.origin}/dashboard` },
+            options: { redirectTo: `${window.location.origin}/auth/callback` },
         });
     };
 
