@@ -17,7 +17,11 @@ export default function LoginPage() {
     const navigate = useNavigate();
 
     useEffect(() => {
-        if (!loading && user) navigate("/dashboard", { replace: true });
+        if (!loading && user) {
+            const savedPath = sessionStorage.getItem("login_redirect");
+            sessionStorage.removeItem("login_redirect");
+            navigate(savedPath && savedPath !== "/login" ? savedPath : "/dashboard", { replace: true });
+        }
     }, [user, loading, navigate]);
 
     return (
