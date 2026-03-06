@@ -14,7 +14,7 @@ import LifestyleModal, {
     saveLifestyleProfile,
 } from "./components/LifestyleModal";
 import { lifestyleToDirectives } from "./utils/lifestyleToDirectives";
-import { debugUrlScraper, processIdeaStream } from "./services/api";
+import { debugUrlScraper, planIdeaStream, reviseScaffold, extractIdeaStream } from "./services/api";
 import type {
     InputDirectives,
     ItineraryNode,
@@ -24,6 +24,7 @@ import type {
 } from "./types";
 import "./App.css";
 import IdeaDropzone from "./components/IdeaDropZone";
+import ScaffoldReviewCard from "./components/ScaffoldReviewCard";
 
 const sortByName = <T extends { name: string }>(a: T, b: T) =>
     a.name.localeCompare(b.name);
@@ -225,6 +226,14 @@ export default function App() {
         LOADING_PHASES[0].defaultDetail,
     );
     const [error, setError] = useState<string | null>(null);
+
+    // ── Scaffold review state (human-in-the-loop) ───────────────────────────
+    const [scaffoldReady, setScaffoldReady] = useState(false);
+    const [scaffoldText, setScaffoldText] = useState<string | null>(null);
+    const [sessionId, setSessionId] = useState<string | null>(null);
+    const [revisionCount, setRevisionCount] = useState(0);
+    const [scaffoldFeedback, setScaffoldFeedback] = useState("");
+    const [revisingScaffold, setRevisingScaffold] = useState(false);
 
     const parseLines = (value: string) =>
         value
@@ -615,6 +624,247 @@ export default function App() {
         }
     };
 
+    // ── Human-in-the-loop plan handlers ────────────────────────────────────
+
+    /**
+     * Step 1: send idea to /api/ideas/plan (SSE), await scaffold_ready, show review card.
+     */
+    const handlePlanRequest = async (idea: string, profileOverride?: LifestyleProfile | null) => {
+        const resolvedProfile = profileOverride !== undefined ? profileOverride : lifestyleProfile;
+        if (resolvedProfile === null && profileOverride === undefined) {
+            pendingIdeaRef.current = idea;
+            setShowLifestyleModal(true);
+            return;
+        }
+
+        setLoading(true);
+        setError(null);
+        setNodes([]);
+        setScaffoldReady(false);
+        setScaffoldText(null);
+        setSessionId(null);
+        setRevisionCount(0);
+        setScaffoldFeedback("");
+        nodeQueueRef.current = [];
+        if (drainTimerRef.current !== null) {
+            clearInterval(drainTimerRef.current);
+            drainTimerRef.current = null;
+        }
+        setDebugPayload(null);
+        setPlannerReasoning(null);
+        setPlannerCritique(null);
+        setLoadingPhaseIndex(0);
+        setLoadingPhaseLabel(LOADING_PHASES[0].label);
+        setLoadingPhaseDetail(LOADING_PHASES[0].defaultDetail);
+
+        let inputDirectives: InputDirectives = {
+            hard_constraints: parseLines(hardConstraintsInput),
+            soft_preferences: parseLines(softPreferencesInput),
+            must_include: parseLines(mustIncludeInput),
+            avoid: parseLines(avoidInput),
+        };
+        if (resolvedProfile) {
+            inputDirectives = lifestyleToDirectives(resolvedProfile, inputDirectives);
+        }
+
+        let resolvedTripDays: number | undefined;
+        if (tripWindowMode === "fixed") {
+            if (!startDateInput || !endDateInput) {
+                setError("Please select both start and end dates, or switch to 'Not decided yet' and enter trip days.");
+                setLoading(false);
+                return;
+            }
+            if (startDateInput > endDateInput) {
+                setError("Start date must be earlier than or equal to end date.");
+                setLoading(false);
+                return;
+            }
+        } else {
+            const parsedDays = Number.parseInt(tripDaysInput, 10);
+            if (!Number.isFinite(parsedDays) || parsedDays < 1 || parsedDays > 60) {
+                setError("Trip days must be a whole number between 1 and 60.");
+                setLoading(false);
+                return;
+            }
+            resolvedTripDays = parsedDays;
+        }
+
+        try {
+            const scaffoldEvent = await planIdeaStream(
+                idea,
+                {
+                    tripId: tripId ?? undefined,
+                    tripLocation: resolvedTripLocation,
+                    startDate: tripWindowMode === "fixed" ? startDateInput || undefined : undefined,
+                    endDate: tripWindowMode === "fixed" ? endDateInput || undefined : undefined,
+                    tripWindowMode,
+                    tripDays: tripWindowMode === "not_decided" ? resolvedTripDays : undefined,
+                    files: pendingFiles,
+                    links: pendingLinks,
+                    inputDirectives,
+                },
+                {
+                    onEvent: ({ event, data }) => {
+                        if (event === "stage_start") {
+                            const stage = String(data.stage ?? "");
+                            const idx = stageIndexMap.get(stage);
+                            if (typeof idx === "number") setLoadingPhaseIndex(idx);
+                            setLoadingPhaseLabel(typeof data.label === "string" ? data.label : "Processing stage");
+                            if (typeof data.detail === "string") setLoadingPhaseDetail(data.detail);
+                            return;
+                        }
+                        if (event === "stage_done") {
+                            const elapsedMs = Number(data.elapsed_ms ?? 0);
+                            if (Number.isFinite(elapsedMs) && elapsedMs > 0) {
+                                setLoadingPhaseDetail(`Completed in ${(elapsedMs / 1000).toFixed(1)}s`);
+                            } else {
+                                setLoadingPhaseDetail("Completed.");
+                            }
+                            return;
+                        }
+                        if (event === "error") {
+                            const message = typeof data.message === "string" ? data.message : "Planning failed.";
+                            setError(message);
+                        }
+                    },
+                },
+            );
+            // Set scaffold state from the authoritative resolved event
+            setScaffoldText(scaffoldEvent.scaffold_text);
+            setSessionId(scaffoldEvent.session_id);
+            setRevisionCount(scaffoldEvent.revision_count);
+            setScaffoldReady(true);
+            setLoadingPhaseLabel("Draft plan ready");
+            setLoadingPhaseDetail("Review and approve your plan to generate the full itinerary.");
+        } catch (err: unknown) {
+            setError(err instanceof Error ? err.message : "Something went wrong");
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    /**
+     * Step 2 (optional): revise scaffold based on user feedback.
+     */
+    const handleRevise = async () => {
+        if (!sessionId || !scaffoldText || revisionCount >= 1) return;
+
+        setRevisingScaffold(true);
+        try {
+            const result = await reviseScaffold(sessionId, scaffoldText, scaffoldFeedback);
+            setScaffoldText(result.scaffold_text);
+            setRevisionCount(result.revision_count);
+            setScaffoldFeedback("");
+        } catch (err: unknown) {
+            setError(err instanceof Error ? err.message : "Revision failed");
+        } finally {
+            setRevisingScaffold(false);
+        }
+    };
+
+    /**
+     * Step 3: extract full itinerary from approved scaffold.
+     */
+    const handleExtract = async (approvedScaffold: string) => {
+        if (!sessionId) return;
+
+        setLoading(true);
+        setScaffoldReady(false);
+        setError(null);
+        setNodes([]);
+        nodeQueueRef.current = [];
+        if (drainTimerRef.current !== null) {
+            clearInterval(drainTimerRef.current);
+            drainTimerRef.current = null;
+        }
+        setDebugPayload(null);
+        setLoadingPhaseIndex(0);
+        setLoadingPhaseLabel("Generating itinerary");
+        setLoadingPhaseDetail("Extracting structured plan from approved scaffold.");
+
+        try {
+            const res = await extractIdeaStream(
+                sessionId,
+                approvedScaffold,
+                {
+                    onEvent: ({ event, data }) => {
+                        if (event === "stage_start") {
+                            const stage = String(data.stage ?? "");
+                            const idx = stageIndexMap.get(stage);
+                            if (typeof idx === "number") setLoadingPhaseIndex(idx);
+                            setLoadingPhaseLabel(typeof data.label === "string" ? data.label : "Processing stage");
+                            if (typeof data.detail === "string") setLoadingPhaseDetail(data.detail);
+                            return;
+                        }
+                        if (event === "stage_done") {
+                            const elapsedMs = Number(data.elapsed_ms ?? 0);
+                            if (Number.isFinite(elapsedMs) && elapsedMs > 0) {
+                                setLoadingPhaseDetail(`Completed in ${(elapsedMs / 1000).toFixed(1)}s`);
+                            } else {
+                                setLoadingPhaseDetail("Completed.");
+                            }
+                            return;
+                        }
+                        if (event === "node_batch") {
+                            const incoming = asItineraryNodeArray(data.nodes);
+                            if (incoming.length > 0) nodeQueueRef.current.push(...incoming);
+                            const sequence = Number(data.sequence ?? NaN);
+                            const total = Number(data.total_batches ?? NaN);
+                            const day = typeof data.day === "string" ? data.day : "day segment";
+                            if (Number.isFinite(sequence) && Number.isFinite(total)) {
+                                setLoadingPhaseLabel(`Building your itinerary (day ${sequence} of ${total})`);
+                                setLoadingPhaseDetail(`Queued ${incoming.length} activities for ${day}.`);
+                            } else {
+                                setLoadingPhaseLabel("Building your itinerary");
+                                setLoadingPhaseDetail(`Queued ${incoming.length} activities.`);
+                            }
+                            if (drainTimerRef.current === null) {
+                                drainTimerRef.current = setInterval(() => {
+                                    const next = nodeQueueRef.current.shift();
+                                    if (next) {
+                                        setNodes((prev) => mergeNodesByIdentity(prev, [next]));
+                                    } else {
+                                        clearInterval(drainTimerRef.current!);
+                                        drainTimerRef.current = null;
+                                    }
+                                }, 80);
+                            }
+                            return;
+                        }
+                        if (event === "error") {
+                            const message = typeof data.message === "string" ? data.message : "Extraction failed.";
+                            setError(message);
+                        }
+                    },
+                },
+                debugMode,
+            );
+            setNodes(res.nodes);
+            setTripId(res.trip_id);
+            if (debugMode) {
+                setDebugPayload(res as ProcessIdeaDebugResponse);
+            }
+            setPendingFiles([]);
+            setPendingLinks([]);
+            setLinkInput("");
+            setLinkError(null);
+            setSessionId(null);
+        } catch (err: unknown) {
+            setError(err instanceof Error ? err.message : "Something went wrong");
+        } finally {
+            if (drainTimerRef.current !== null) {
+                clearInterval(drainTimerRef.current);
+                drainTimerRef.current = null;
+            }
+            if (nodeQueueRef.current.length > 0) {
+                const remaining = [...nodeQueueRef.current];
+                nodeQueueRef.current = [];
+                setNodes((prev) => mergeNodesByIdentity(prev, remaining));
+            }
+            setLoading(false);
+        }
+    };
+
     const handleFilesAdded = (files: File[]) => {
         setPendingFiles((prev) => [...prev, ...files]);
     };
@@ -682,7 +932,7 @@ export default function App() {
         const idea = pendingIdeaRef.current;
         pendingIdeaRef.current = null;
         if (idea !== null) {
-            void handleSubmit(idea, profile);
+            void handlePlanRequest(idea, profile);
         }
     };
 
@@ -703,7 +953,7 @@ export default function App() {
         saveLifestyleProfile(skippedProfile);
         setLifestyleProfile(skippedProfile);
         if (idea !== null) {
-            void handleSubmit(idea, skippedProfile);
+            void handlePlanRequest(idea, skippedProfile);
         }
     };
 
@@ -1277,7 +1527,7 @@ export default function App() {
                         </div>
                     </div>
                     <IdeaInput
-                        onSubmit={handleSubmit}
+                        onSubmit={handlePlanRequest}
                         loading={loading}
                         loadingPhaseLabel={loadingPhaseLabel}
                         loadingPhaseDetail={loadingPhaseDetail}
@@ -1286,18 +1536,34 @@ export default function App() {
                     />
                 </section>
                 <section className="right-panel">
-                    <ResultDisplay
-                        nodes={nodes}
-                        tripId={tripId}
-                        plannerReasoning={plannerReasoning}
-                        error={error}
-                        debugPayload={debugPayload}
-                        loading={loading}
-                        loadingPhaseLabel={loadingPhaseLabel}
-                        loadingPhaseDetail={loadingPhaseDetail}
-                        loadingStepIndex={loadingPhaseIndex}
-                        loadingTotalSteps={LOADING_PHASES.length}
-                    />
+                    {scaffoldReady && scaffoldText ? (
+                        <div className="result-zone">
+                            <ScaffoldReviewCard
+                                scaffoldText={scaffoldText}
+                                revisionCount={revisionCount}
+                                maxRevisions={1}
+                                feedback={scaffoldFeedback}
+                                onFeedbackChange={setScaffoldFeedback}
+                                onRevise={handleRevise}
+                                onApprove={handleExtract}
+                                isRevising={revisingScaffold}
+                            />
+                        </div>
+                    ) : (
+                        <ResultDisplay
+                            nodes={nodes}
+                            tripId={tripId}
+                            onNodesChange={(updated) => setNodes(updated)}
+                            plannerReasoning={plannerReasoning}
+                            error={error}
+                            debugPayload={debugPayload}
+                            loading={loading}
+                            loadingPhaseLabel={loadingPhaseLabel}
+                            loadingPhaseDetail={loadingPhaseDetail}
+                            loadingStepIndex={loadingPhaseIndex}
+                            loadingTotalSteps={LOADING_PHASES.length}
+                        />
+                    )}
                 </section>
             </main>
         </div>
