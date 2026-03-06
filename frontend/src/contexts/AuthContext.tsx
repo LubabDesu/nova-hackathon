@@ -18,15 +18,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-        // onAuthStateChange fires immediately with INITIAL_SESSION (handles OAuth hash too),
-        // so we use it as the single source of truth instead of a separate getSession() call.
-        const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+        // Detect if the current URL carries OAuth tokens (implicit flow hash or PKCE code).
+        // If so, Supabase needs time to exchange them — don't flip loading=false on
+        // the initial null-session event or ProtectedRoute will navigate away and
+        // destroy the hash before the exchange completes.
+        const isOAuthCallback =
+            window.location.hash.includes("access_token") ||
+            window.location.search.includes("code=");
+
+        const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
             setSession(session);
             setUser(session?.user ?? null);
+
+            if (isOAuthCallback && event === "INITIAL_SESSION" && !session) {
+                // Hash/code not yet exchanged — stay in loading state
+                return;
+            }
             setLoading(false);
         });
 
-        return () => subscription.unsubscribe();
+        // Safety net: if OAuth exchange never completes, stop loading after 5 s
+        let timeout: ReturnType<typeof setTimeout> | undefined;
+        if (isOAuthCallback) {
+            timeout = setTimeout(() => setLoading(false), 5000);
+        }
+
+        return () => {
+            subscription.unsubscribe();
+            if (timeout) clearTimeout(timeout);
+        };
     }, []);
 
     const signInWithGoogle = async () => {
