@@ -193,3 +193,20 @@ class ReoptimizeDay(BaseModel):
 class ReoptimizeTimingsRequest(BaseModel):
     days: list[ReoptimizeDay]
     wake_time: str = "09:00"
+
+
+# ── Booking models ────────────────────────────────────────────────────────────
+
+class BookingStartRequest(BaseModel):
+    restaurant_name: str = Field(..., min_length=1)
+    city: str = Field(..., min_length=1)
+    date: str = Field(..., pattern=r"^\d{4}-\d{2}-\d{2}$")
+    time: str = Field(..., pattern=r"^\d{2}:\d{2}$")
+    party_size: int = Field(..., ge=1, le=20)
+
+
+class BookingResumeRequest(BaseModel):
+    phone: str | None = Field(default=None, min_length=1)
+    email: str | None = Field(default=None, min_length=1)
+    password: str | None = Field(default=None, min_length=1)
+    notes: str | None = None

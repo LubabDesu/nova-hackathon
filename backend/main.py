@@ -10,6 +10,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from routes.ideas import router as ideas_router
+from routes.bookings import router as bookings_router
 
 logging.basicConfig(level=logging.INFO)
 
@@ -29,6 +30,7 @@ app.add_middleware(
 
 # ── Routers ─────────────────────────────────────────────────────────────────
 app.include_router(ideas_router)
+app.include_router(bookings_router)
 
 
 @app.get("/")

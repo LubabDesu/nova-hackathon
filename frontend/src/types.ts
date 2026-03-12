@@ -298,6 +298,51 @@ export type ProcessIdeaApiResponse =
     | ProcessIdeaResponse
     | ProcessIdeaDebugResponse;
 
+// ── Booking types ──────────────────────────────────────────────────────────────
+
+export interface BookingStartRequest {
+    restaurant_name: string;
+    city: string;
+    date: string;       // YYYY-MM-DD
+    time: string;       // HH:MM
+    party_size: number;
+}
+
+export interface BookingResumeData {
+    phone?: string;
+    email?: string;
+    password?: string;
+    notes?: string;
+}
+
+export interface BookingSession {
+    session_id: string;
+}
+
+export interface BookingNeedsUserInputEvent {
+    fields: string[];   // e.g. ["phone"] or ["manual_required"]
+}
+
+// ── Agent action events (real-time tool calls during planning) ───────────────
+export interface AgentActionEvent {
+    tool_name:
+        | "search_activities"
+        | "get_local_events"
+        | "get_weather"
+        | "validate_place"
+        | "write_to_scratchpad"
+        | "self_critique_plan"
+        | "ask_user"
+        | "finalize_plan";
+    summary: string;
+    reasoning?: string;
+    result_preview?: string;
+    tool_input?: Record<string, unknown>;
+    elapsed_ms?: number;
+    iteration?: number;
+    scratchpad?: string;
+}
+
 // ── Human-in-the-loop scaffold review ────────────────────────────────────────
 export interface ScaffoldReadyEvent {
     session_id: string;
