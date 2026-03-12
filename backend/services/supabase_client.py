@@ -91,3 +91,29 @@ def insert_nodes(trip_id: str, nodes: list[ItineraryNode]) -> list[dict]:
             trip_id,
         )
         return legacy_result.data
+
+
+def update_nodes(nodes: list[ItineraryNode], trip_id: str) -> list[dict]:
+    """Bulk-upsert itinerary nodes by id. Only updates editable fields."""
+    if not nodes:
+        return []
+    rows = [
+        {
+            "id": n.id,
+            "trip_id": trip_id,
+            "title": n.title,
+            "description": n.description,
+            "duration_mins": n.duration_mins,
+            "date_local": n.date_local,
+            "start_time_local": n.start_time_local,
+            "end_time_local": n.end_time_local,
+        }
+        for n in nodes
+        if n.id is not None
+    ]
+    if not rows:
+        logger.warning("update_nodes called but no nodes had ids; skipping")
+        return []
+    result = supabase.table("itinerary_nodes").upsert(rows, on_conflict="id").execute()
+    logger.info("Upserted %d nodes", len(result.data))
+    return result.data

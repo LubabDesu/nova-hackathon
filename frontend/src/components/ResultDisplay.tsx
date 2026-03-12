@@ -1,13 +1,42 @@
 // NovaSync — Zone 2: Result Display
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties } from "react";
 import type { ItineraryNode, ProcessIdeaDebugResponse, WorkerReport } from "../types";
+import {
+    DndContext,
+    closestCenter,
+    KeyboardSensor,
+    PointerSensor,
+    useSensor,
+    useSensors,
+    DragOverlay,
+    type DragEndEvent,
+    type DragStartEvent,
+} from "@dnd-kit/core";
+import {
+    SortableContext,
+    sortableKeyboardCoordinates,
+    useSortable,
+    verticalListSortingStrategy,
+    arrayMove,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import { repackDay, validatePlan, isFillerNode } from "../utils/itineraryUtils";
+import { saveEditedNodes, reoptimizeTimings } from "../services/api";
 
 interface ResultDisplayProps {
     nodes: ItineraryNode[];
     tripId: string | null;
+    onNodesChange?: (nodes: ItineraryNode[]) => void;
+    plannerReasoning: string | null;
     error: string | null;
     debugPayload: ProcessIdeaDebugResponse | null;
+    loading: boolean;
+    loadingPhaseLabel?: string;
+    loadingPhaseDetail?: string;
+    loadingStepIndex?: number;
+    loadingTotalSteps?: number;
 }
 
 const TYPE_COLORS: Record<string, string> = {
@@ -22,15 +51,144 @@ const TYPE_COLORS: Record<string, string> = {
     relaxation: "#d9f99d",
 };
 
+function SortableCard({
+    id,
+    node,
+    onNodeChange,
+}: {
+    id: string;
+    node: ItineraryNode;
+    onNodeChange: (updated: ItineraryNode) => void;
+}) {
+    const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+        useSortable({ id });
+
+    const style: CSSProperties = {
+        transform: CSS.Transform.toString(transform),
+        transition,
+        // When dragging: show an empty "ghost slot" — just an outline
+        opacity: isDragging ? 0 : 1,
+        boxShadow: isDragging ? "none" : undefined,
+    };
+
+    return (
+        <div
+            ref={setNodeRef}
+            style={style}
+            className="node-card day-node-card"
+            {...attributes}
+        >
+            {/* Drag handle */}
+            <div
+                {...listeners}
+                style={{ cursor: "grab", fontSize: "0.75rem", color: "#94a3b8", marginBottom: "0.4rem", userSelect: "none" }}
+            >
+                ⠿ drag to reorder
+            </div>
+
+            {/* Time row */}
+            <div className="schedule-row" style={{ gap: "0.5rem", flexWrap: "wrap" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "0.3rem" }}>
+                    <label style={{ fontSize: "0.72rem", color: "#64748b" }}>Start</label>
+                    <input
+                        type="time"
+                        value={node.start_time_local ?? ""}
+                        onChange={(e) => onNodeChange({ ...node, start_time_local: e.target.value })}
+                        style={{ fontSize: "0.78rem", border: "1px solid #e2e8f0", borderRadius: "4px", padding: "0.1rem 0.3rem" }}
+                    />
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: "0.3rem" }}>
+                    <label style={{ fontSize: "0.72rem", color: "#64748b" }}>Duration</label>
+                    <input
+                        type="number"
+                        min={5}
+                        step={5}
+                        value={node.duration_mins ?? ""}
+                        onChange={(e) => onNodeChange({ ...node, duration_mins: parseInt(e.target.value, 10) || null })}
+                        style={{ width: "4rem", fontSize: "0.78rem", border: "1px solid #e2e8f0", borderRadius: "4px", padding: "0.1rem 0.3rem" }}
+                    />
+                    <span style={{ fontSize: "0.72rem", color: "#64748b" }}>min</span>
+                </div>
+            </div>
+
+            {/* Editable title */}
+            <input
+                type="text"
+                value={node.title}
+                onChange={(e) => onNodeChange({ ...node, title: e.target.value })}
+                style={{
+                    width: "100%",
+                    fontWeight: 600,
+                    fontSize: "1rem",
+                    border: "1px solid #e2e8f0",
+                    borderRadius: "6px",
+                    padding: "0.3rem 0.5rem",
+                    marginBottom: "0.3rem",
+                    fontFamily: "inherit",
+                    boxSizing: "border-box",
+                }}
+            />
+
+            {/* Editable description */}
+            <textarea
+                value={node.description ?? ""}
+                onChange={(e) => onNodeChange({ ...node, description: e.target.value })}
+                rows={2}
+                style={{
+                    width: "100%",
+                    fontSize: "0.85rem",
+                    color: "#475569",
+                    border: "1px solid #e2e8f0",
+                    borderRadius: "6px",
+                    padding: "0.3rem 0.5rem",
+                    fontFamily: "inherit",
+                    resize: "vertical",
+                    boxSizing: "border-box",
+                }}
+            />
+        </div>
+    );
+}
+
 export default function ResultDisplay({
     nodes,
     tripId,
+    onNodesChange,
+    plannerReasoning,
     error,
     debugPayload,
+    loading,
+    loadingPhaseLabel,
+    loadingPhaseDetail,
+    loadingStepIndex,
+    loadingTotalSteps,
 }: ResultDisplayProps) {
-    const [activeDebugTab, setActiveDebugTab] = useState<"workers" | "evidence" | "validation">(
+    const [activeDebugTab, setActiveDebugTab] = useState<"workers" | "evidence" | "validation" | "trace">(
         "workers",
     );
+
+    const [isEditing, setIsEditing] = useState(false);
+    const [editedNodes, setEditedNodes] = useState<ItineraryNode[]>([]);
+    const [isSaving, setIsSaving] = useState(false);
+    const [isReoptimizing, setIsReoptimizing] = useState(false);
+    const [saveError, setSaveError] = useState<string | null>(null);
+    const [activeDragId, setActiveDragId] = useState<string | null>(null);
+
+    function handleDragStart(event: DragStartEvent) {
+        setActiveDragId(String(event.active.id));
+    }
+
+    function enterEditMode() {
+        setEditedNodes(nodes.filter((n) => !isFillerNode(n)));
+        setIsEditing(true);
+        setSaveError(null);
+    }
+
+    function cancelEditMode() {
+        setIsEditing(false);
+        setEditedNodes([]);
+        setSaveError(null);
+    }
 
     const sortedNodes = [...nodes].sort((a, b) => {
         const dateA = a.date_local ?? "9999-12-31";
@@ -43,6 +201,196 @@ export default function ResultDisplay({
 
         return 0;
     });
+    const dayGroups = useMemo(() => {
+        const buckets = new Map<string, ItineraryNode[]>();
+        for (const node of sortedNodes) {
+            const key = node.date_local ?? "unscheduled";
+            const existing = buckets.get(key);
+            if (existing) {
+                existing.push(node);
+            } else {
+                buckets.set(key, [node]);
+            }
+        }
+
+        const sortedKeys = [...buckets.keys()].sort((a, b) => {
+            if (a === "unscheduled") return 1;
+            if (b === "unscheduled") return -1;
+            return a.localeCompare(b);
+        });
+
+        return sortedKeys.map((key) => {
+            const items = buckets.get(key) ?? [];
+            let earliest: string | null = null;
+            let latest: string | null = null;
+            let totalDuration = 0;
+
+            for (const item of items) {
+                if (item.duration_mins) {
+                    totalDuration += item.duration_mins;
+                }
+                if (item.start_time_local) {
+                    if (!earliest || item.start_time_local < earliest) {
+                        earliest = item.start_time_local;
+                    }
+                }
+                if (item.end_time_local) {
+                    if (!latest || item.end_time_local > latest) {
+                        latest = item.end_time_local;
+                    }
+                }
+            }
+
+            return {
+                key,
+                label: formatDateLabel(key),
+                items,
+                earliest,
+                latest,
+                totalDuration,
+            };
+        });
+    }, [sortedNodes]);
+
+    const editedDayGroups = useMemo(() => {
+        if (!isEditing) return [];
+        const buckets = new Map<string, ItineraryNode[]>();
+        for (const node of editedNodes) {
+            const key = node.date_local ?? "unscheduled";
+            const bucket = buckets.get(key) ?? [];
+            bucket.push(node);
+            buckets.set(key, bucket);
+        }
+        const sortedKeys = [...buckets.keys()].sort((a, b) => {
+            if (a === "unscheduled") return 1;
+            if (b === "unscheduled") return -1;
+            return a.localeCompare(b);
+        });
+        return sortedKeys.map((key) => ({ key, items: buckets.get(key) ?? [] }));
+    }, [isEditing, editedNodes]);
+
+    const sensors = useSensors(
+        useSensor(PointerSensor),
+        useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+    );
+
+    function handleDragEnd(event: DragEndEvent) {
+        const { active, over } = event;
+        if (!over || active.id === over.id) return;
+
+        const [activeDate, activeIdxStr] = String(active.id).split("::");
+        const [overDate, overIdxStr] = String(over.id).split("::");
+        const activeIdx = parseInt(activeIdxStr, 10);
+        const overIdx = parseInt(overIdxStr, 10);
+
+        setEditedNodes((prev) => {
+            const byDay = new Map<string, ItineraryNode[]>();
+            for (const n of prev) {
+                const k = n.date_local ?? "unscheduled";
+                const b = byDay.get(k) ?? [];
+                b.push(n);
+                byDay.set(k, b);
+            }
+
+            if (activeDate === overDate) {
+                const dayNodes = byDay.get(activeDate) ?? [];
+                const reordered = arrayMove(dayNodes, activeIdx, overIdx);
+                byDay.set(activeDate, repackDay(reordered));
+            } else {
+                const srcNodes = [...(byDay.get(activeDate) ?? [])];
+                const [moved] = srcNodes.splice(activeIdx, 1);
+                byDay.set(activeDate, repackDay(srcNodes));
+
+                const dstNodes = [...(byDay.get(overDate) ?? [])];
+                const movedToDst = { ...moved, date_local: overDate };
+                dstNodes.splice(overIdx, 0, movedToDst);
+                byDay.set(overDate, repackDay(dstNodes));
+            }
+
+            const sortedKeys = [...byDay.keys()].sort((a, b) => a.localeCompare(b));
+            return sortedKeys.flatMap((k) => byDay.get(k) ?? []);
+        });
+    }
+
+    async function handleSave() {
+        if (!tripId) return;
+        const warnings = validatePlan(editedDayGroups);
+        if (warnings.length > 0) {
+            console.warn("Plan warnings:", warnings);
+        }
+        setIsSaving(true);
+        setSaveError(null);
+        try {
+            await saveEditedNodes(tripId, editedNodes);
+            onNodesChange?.(editedNodes);
+            setIsEditing(false);
+            setEditedNodes([]);
+        } catch (err) {
+            setSaveError(err instanceof Error ? err.message : "Save failed");
+        } finally {
+            setIsSaving(false);
+        }
+    }
+
+    async function handleReoptimize() {
+        if (!tripId) return;
+        setIsReoptimizing(true);
+        setSaveError(null);
+        try {
+            const dayPayload = editedDayGroups.map((g) => ({
+                date: g.key,
+                activities: g.items.map((n) => ({
+                    title: n.title,
+                    activity_type: n.activity_type,
+                    duration_mins: n.duration_mins,
+                })),
+            }));
+            const result = await reoptimizeTimings(tripId, dayPayload);
+
+            const timeMap = new Map<string, { start: string; end: string }>();
+            for (const day of result.days) {
+                for (const act of day.activities) {
+                    timeMap.set(act.title, {
+                        start: act.start_time_local,
+                        end: act.end_time_local,
+                    });
+                }
+            }
+            setEditedNodes((prev) =>
+                prev.map((n) => {
+                    const t = timeMap.get(n.title);
+                    return t
+                        ? { ...n, start_time_local: t.start, end_time_local: t.end }
+                        : n;
+                }),
+            );
+        } catch (err) {
+            setSaveError(err instanceof Error ? err.message : "Re-optimize failed");
+        } finally {
+            setIsReoptimizing(false);
+        }
+    }
+
+    function updateEditedNode(updated: ItineraryNode, dayKey: string, indexInDay: number) {
+        setEditedNodes((prev) => {
+            const byDay = new Map<string, ItineraryNode[]>();
+            for (const n of prev) {
+                const k = n.date_local ?? "unscheduled";
+                const b = byDay.get(k) ?? [];
+                b.push(n);
+                byDay.set(k, b);
+            }
+            const dayNodes = [...(byDay.get(dayKey) ?? [])];
+            dayNodes[indexInDay] = updated;
+            // Repack from the changed node onward, anchoring its start time
+            const before = dayNodes.slice(0, indexInDay);
+            const from = dayNodes.slice(indexInDay);
+            byDay.set(dayKey, [...before, ...repackDay(from)]);
+
+            const sortedKeys = [...byDay.keys()].sort((a, b) => a.localeCompare(b));
+            return sortedKeys.flatMap((k) => byDay.get(k) ?? []);
+        });
+    }
 
     const workerReports = debugPayload?.worker_reports ?? [];
     const evidence = debugPayload?.evidence ?? [];
@@ -52,6 +400,23 @@ export default function ResultDisplay({
     const validationActivities = validationReport?.plan?.activities ?? [];
     const planWarnings = validationReport?.plan?.warnings ?? [];
     const planAssumptions = validationReport?.plan?.assumptions ?? [];
+    const debugTrace = debugPayload?.debug_trace;
+    const plannerScaffoldText =
+        (typeof plannerReasoning === "string" && plannerReasoning.trim().length > 0
+            ? plannerReasoning.trim()
+            : null)
+        ?? (typeof debugTrace?.planner_scaffold_text === "string"
+            && debugTrace.planner_scaffold_text.trim().length > 0
+            ? debugTrace.planner_scaffold_text.trim()
+            : null);
+    const plannerScaffoldDebug = debugTrace?.planner_scaffold_debug;
+    const qwenMediaSignals = debugTrace?.qwen_media_signals ?? [];
+    const plannerEvidenceSelected = debugTrace?.planner_evidence_selected ?? [];
+    const plannerEvidenceLines = debugTrace?.planner_evidence_lines ?? [];
+    const plannerEvidenceBudget = debugTrace?.planner_evidence_budget;
+    const webQueryDebug = debugTrace?.web_query_builder;
+    const executedQueries = webQueryDebug?.queries_executed ?? [];
+    const queryOutcomes = webQueryDebug?.query_outcomes ?? [];
 
     const workerStats = useMemo(() => {
         const stats = {
@@ -116,6 +481,13 @@ export default function ResultDisplay({
                         onClick={() => setActiveDebugTab("validation")}
                     >
                         Validation ({validationErrors.length + validationWarnings.length})
+                    </button>
+                    <button
+                        type="button"
+                        className={`debug-tab ${activeDebugTab === "trace" ? "is-active" : ""}`}
+                        onClick={() => setActiveDebugTab("trace")}
+                    >
+                        Trace
                     </button>
                 </div>
 
@@ -313,8 +685,260 @@ export default function ResultDisplay({
                         )}
                     </div>
                 )}
+
+                {activeDebugTab === "trace" && (
+                    <div className="debug-content">
+                        <div className="debug-stats-row">
+                            <div className="debug-stat-card">
+                                <p className="debug-stat-label">Qwen Signals</p>
+                                <p className="debug-stat-value">
+                                    {debugTrace?.qwen_media_signal_count ?? qwenMediaSignals.length}
+                                </p>
+                            </div>
+                            <div className="debug-stat-card">
+                                <p className="debug-stat-label">Planner Evidence</p>
+                                <p className="debug-stat-value">
+                                    {plannerEvidenceSelected.length}
+                                </p>
+                            </div>
+                            <div className="debug-stat-card">
+                                <p className="debug-stat-label">Prompt Chars</p>
+                                <p className="debug-stat-value">
+                                    {debugTrace?.planner_prompt_chars ?? 0}
+                                </p>
+                            </div>
+                            <div className="debug-stat-card">
+                                <p className="debug-stat-label">Scaffold Chars</p>
+                                <p className="debug-stat-value">
+                                    {plannerScaffoldDebug?.scaffold_chars ?? 0}
+                                </p>
+                            </div>
+                            <div className="debug-stat-card">
+                                <p className="debug-stat-label">Budget</p>
+                                <p className="debug-stat-value">
+                                    {plannerEvidenceBudget
+                                        ? `${plannerEvidenceBudget.selected_items}/${plannerEvidenceBudget.max_items}`
+                                        : "N/A"}
+                                </p>
+                            </div>
+                            <div className="debug-stat-card">
+                                <p className="debug-stat-label">Query Source</p>
+                                <p className="debug-stat-value">
+                                    {webQueryDebug?.query_source ?? "N/A"}
+                                </p>
+                            </div>
+                        </div>
+
+                        {debugTrace?.qwen_media_error && (
+                            <p className="debug-empty-message">
+                                qwen_media_error: {debugTrace.qwen_media_error}
+                            </p>
+                        )}
+
+                        <section className="validation-message-block">
+                            <h4>Qwen Media Signals</h4>
+                            {qwenMediaSignals.length === 0 ? (
+                                <p className="debug-empty-message">No visual signals extracted.</p>
+                            ) : (
+                                <div className="evidence-list">
+                                    {qwenMediaSignals.map((signal, index) => (
+                                        <article className="evidence-card" key={`qwen-signal-${index}`}>
+                                            <div className="evidence-card-head">
+                                                <h4>{signal.source_filename ?? `signal_${index + 1}`}</h4>
+                                                <span className="evidence-meta">
+                                                    conf {Math.round(signal.confidence * 100)}%
+                                                </span>
+                                            </div>
+                                            <p className="evidence-summary">{signal.summary}</p>
+                                            {signal.location_cues.length > 0 && (
+                                                <p className="evidence-facts-line">
+                                                    <strong>location_cues:</strong>{" "}
+                                                    {signal.location_cues.join(" | ")}
+                                                </p>
+                                            )}
+                                            {signal.activity_hints.length > 0 && (
+                                                <p className="evidence-facts-line">
+                                                    <strong>activity_hints:</strong>{" "}
+                                                    {signal.activity_hints.join(" | ")}
+                                                </p>
+                                            )}
+                                            {signal.vibe_tags.length > 0 && (
+                                                <p className="evidence-facts-line">
+                                                    <strong>vibe_tags:</strong>{" "}
+                                                    {signal.vibe_tags.join(" | ")}
+                                                </p>
+                                            )}
+                                            {signal.constraints.length > 0 && (
+                                                <p className="evidence-facts-line">
+                                                    <strong>constraints:</strong>{" "}
+                                                    {signal.constraints.join(" | ")}
+                                                </p>
+                                            )}
+                                        </article>
+                                    ))}
+                                </div>
+                            )}
+                        </section>
+
+                        <section className="validation-message-block">
+                            <h4>Planner Reasoning Scaffold</h4>
+                            <p className="evidence-summary">
+                                enabled={String(plannerScaffoldDebug?.scaffold_enabled ?? false)}
+                                {" | "}
+                                model={plannerScaffoldDebug?.scaffold_model_selected ?? plannerScaffoldDebug?.scaffold_model_requested ?? "N/A"}
+                                {" | "}
+                                response_model={plannerScaffoldDebug?.response_model ?? "N/A"}
+                            </p>
+                            {plannerScaffoldDebug?.error && (
+                                <p className="debug-empty-message">
+                                    scaffold_error: {plannerScaffoldDebug.error}
+                                </p>
+                            )}
+                            {plannerScaffoldText ? (
+                                <pre className="reasoning-pre">{plannerScaffoldText}</pre>
+                            ) : (
+                                <p className="debug-empty-message">
+                                    No planner scaffold text captured.
+                                </p>
+                            )}
+                        </section>
+
+                        <section className="validation-message-block">
+                            <h4>Planner Evidence Pack</h4>
+                            {plannerEvidenceBudget && (
+                                <p className="evidence-summary">
+                                    selected_items={plannerEvidenceBudget.selected_items}, max_items={plannerEvidenceBudget.max_items}, selected_chars={plannerEvidenceBudget.selected_chars}, max_chars={plannerEvidenceBudget.max_chars}
+                                </p>
+                            )}
+                            {plannerEvidenceSelected.length === 0 ? (
+                                <p className="debug-empty-message">No selected planner evidence.</p>
+                            ) : (
+                                <div className="evidence-list">
+                                    {plannerEvidenceSelected.map((item) => (
+                                        <article className="evidence-card" key={`planner-pack-${item.id}`}>
+                                            <div className="evidence-card-head">
+                                                <h4>{item.id}</h4>
+                                                <span className="evidence-meta">
+                                                    {item.source_type} | conf {Math.round(item.confidence * 100)}%
+                                                </span>
+                                            </div>
+                                            <p className="evidence-summary">{item.summary}</p>
+                                        </article>
+                                    ))}
+                                </div>
+                            )}
+                        </section>
+
+                        <section className="validation-message-block">
+                            <h4>Planner Evidence Lines</h4>
+                            {plannerEvidenceLines.length === 0 ? (
+                                <p className="debug-empty-message">No rendered evidence lines.</p>
+                            ) : (
+                                <ul className="validation-list">
+                                    {plannerEvidenceLines.map((line, index) => (
+                                        <li key={`planner-line-${index}`}>{line}</li>
+                                    ))}
+                                </ul>
+                            )}
+                        </section>
+
+                        <section className="validation-message-block">
+                            <h4>Web Query Builder</h4>
+                            <p className="evidence-summary">
+                                model={webQueryDebug?.model_debug?.query_builder_model ?? "N/A"} | source={webQueryDebug?.query_source ?? "N/A"} | provider={webQueryDebug?.provider_requested ?? webQueryDebug?.provider ?? "N/A"}
+                            </p>
+                            <p className="evidence-summary">
+                                tavily_key_present={String(webQueryDebug?.tavily_key_present ?? false)} | brave_key_present={String(webQueryDebug?.brave_key_present ?? false)}
+                            </p>
+                            {webQueryDebug?.fallback_reason && (
+                                <p className="debug-empty-message">
+                                    fallback_reason: {webQueryDebug.fallback_reason}
+                                </p>
+                            )}
+                            {webQueryDebug?.model_debug?.error && (
+                                <p className="debug-empty-message">
+                                    query_builder_error: {webQueryDebug.model_debug.error}
+                                </p>
+                            )}
+                            {webQueryDebug?.model_debug?.error_body && (
+                                <p className="debug-empty-message">
+                                    openrouter_error_body: {webQueryDebug.model_debug.error_body}
+                                </p>
+                            )}
+                            {webQueryDebug?.model_debug?.attempts && webQueryDebug.model_debug.attempts.length > 0 && (
+                                <ul className="validation-list">
+                                    {webQueryDebug.model_debug.attempts.map((attempt, index) => (
+                                        <li key={`query-builder-attempt-${index}`}>
+                                            model={attempt.model}, include_temperature={String(attempt.include_temperature)}, status={attempt.status}
+                                            {attempt.http_status ? `, http_status=${attempt.http_status}` : ""}
+                                            {attempt.error ? `, error=${attempt.error}` : ""}
+                                        </li>
+                                    ))}
+                                </ul>
+                            )}
+                            {executedQueries.length === 0 ? (
+                                <p className="debug-empty-message">No executed queries recorded.</p>
+                            ) : (
+                                <ul className="validation-list">
+                                    {executedQueries.map((query, index) => (
+                                        <li key={`executed-query-${index}`}>{query}</li>
+                                    ))}
+                                </ul>
+                            )}
+                            {queryOutcomes.length > 0 && (
+                                <div className="evidence-list">
+                                    {queryOutcomes.map((outcome, index) => (
+                                        <article className="evidence-card" key={`query-outcome-${index}`}>
+                                            <div className="evidence-card-head">
+                                                <h4>{outcome.query}</h4>
+                                                <span className="evidence-meta">
+                                                    {outcome.provider} | {outcome.result_count} results
+                                                </span>
+                                            </div>
+                                            {outcome.error && (
+                                                <p className="evidence-summary">error: {outcome.error}</p>
+                                            )}
+                                            {outcome.snippet_digest && (
+                                                <p className="evidence-summary">{outcome.snippet_digest}</p>
+                                            )}
+                                            {outcome.result_count === 0 && !outcome.error && (
+                                                <p className="evidence-summary evidence-summary--warn">
+                                                    No results — DuckDuckGo may be blocking the request. Set TAVILY_API_KEY or BRAVE_SEARCH_API_KEY in .env for reliable results.
+                                                </p>
+                                            )}
+                                            {outcome.citations.length > 0 && (
+                                                <div className="evidence-citations">
+                                                    {outcome.citations.map((citation, citationIndex) => (
+                                                        <a
+                                                            href={citation}
+                                                            target="_blank"
+                                                            rel="noreferrer"
+                                                            key={`query-${index}-citation-${citationIndex}`}
+                                                        >
+                                                            {formatCitation(citation)}
+                                                        </a>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </article>
+                                    ))}
+                                </div>
+                            )}
+                        </section>
+                    </div>
+                )}
             </div>
         </details>
+    ) : null;
+
+    const reasoningSection = plannerScaffoldText ? (
+        <section className="reasoning-panel">
+            <header className="reasoning-head">
+                <p className="reasoning-kicker">Planner Reasoning</p>
+                <span className="reasoning-badge">Draft before JSON extraction</span>
+            </header>
+            <pre className="reasoning-pre">{plannerScaffoldText}</pre>
+        </section>
     ) : null;
 
     if (error) {
@@ -324,6 +948,7 @@ export default function ResultDisplay({
                     <span className="error-icon">⚠️</span>
                     <p>{error}</p>
                 </div>
+                {reasoningSection}
                 {debugSection}
             </div>
         );
@@ -332,9 +957,21 @@ export default function ResultDisplay({
     if (nodes.length === 0) {
         return (
             <div className="result-zone empty-state">
-                <div className="empty-graphic">🗺️</div>
-                <h3>Your itinerary will appear here</h3>
-                <p>Submit your travel ideas on the left to get started.</p>
+                {loading ? (
+                    <PlanningStatusCard
+                        loadingPhaseLabel={loadingPhaseLabel}
+                        loadingPhaseDetail={loadingPhaseDetail}
+                        loadingStepIndex={loadingStepIndex}
+                        loadingTotalSteps={loadingTotalSteps}
+                    />
+                ) : (
+                    <>
+                        <div className="empty-graphic">🗺️</div>
+                        <h3>Your itinerary will appear here</h3>
+                        <p>Submit your travel ideas on the left to get started.</p>
+                    </>
+                )}
+                {reasoningSection}
                 {debugSection}
             </div>
         );
@@ -342,61 +979,215 @@ export default function ResultDisplay({
 
     return (
         <div className="result-zone">
+            {loading && (
+                <PlanningStatusCard
+                    loadingPhaseLabel={loadingPhaseLabel}
+                    loadingPhaseDetail={loadingPhaseDetail}
+                    loadingStepIndex={loadingStepIndex}
+                    loadingTotalSteps={loadingTotalSteps}
+                />
+            )}
             <div className="result-header">
                 <h2 className="zone-title">
                     <span className="zone-icon">📋</span> Extracted Itinerary
                 </h2>
-                {tripId && (
-                    <span className="trip-badge">
-                        Trip: {tripId.slice(0, 8)}…
-                    </span>
-                )}
-            </div>
-            <div className="nodes-grid">
-                {sortedNodes.map((node, i) => (
-                    <div className="node-card" key={i}>
-                        {(node.date_local || node.start_time_local || node.end_time_local) && (
-                            <div className="schedule-row">
-                                <span className="schedule-date">
-                                    {node.date_local ?? "Unscheduled date"}
-                                </span>
-                                {(node.start_time_local || node.end_time_local) && (
-                                    <span className="schedule-time">
-                                        {node.start_time_local ?? "??:??"} -{" "}
-                                        {node.end_time_local ?? "??:??"}
-                                    </span>
-                                )}
-                            </div>
-                        )}
-                        <div className="node-card-header">
-                            <span
-                                className="activity-badge"
-                                style={{
-                                    backgroundColor:
-                                        TYPE_COLORS[node.activity_type] ??
-                                        "#94a3b8",
-                                }}
+                <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+                    {isEditing && (
+                        <button
+                            type="button"
+                            className="scaffold-btn scaffold-btn-revise"
+                            onClick={handleReoptimize}
+                            disabled={isReoptimizing || isSaving}
+                        >
+                            {isReoptimizing ? "Optimizing…" : "Re-optimize timings"}
+                        </button>
+                    )}
+                    {nodes.length > 0 && tripId && (
+                        isEditing ? (
+                            <>
+                                <button
+                                    type="button"
+                                    className="scaffold-btn scaffold-btn-revise"
+                                    onClick={cancelEditMode}
+                                    disabled={isSaving}
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    type="button"
+                                    className="scaffold-btn scaffold-btn-approve"
+                                    onClick={handleSave}
+                                    disabled={isSaving}
+                                >
+                                    {isSaving ? "Saving…" : "Save Changes"}
+                                </button>
+                            </>
+                        ) : (
+                            <button
+                                type="button"
+                                className="scaffold-btn scaffold-btn-revise"
+                                onClick={enterEditMode}
+                                disabled={loading}
                             >
-                                {node.activity_type}
-                            </span>
-                            {node.duration_mins && (
-                                <span className="duration-pill">
-                                    ⏱ {node.duration_mins} min
-                                </span>
-                            )}
-                        </div>
-                        <h3 className="node-title">{node.title}</h3>
-                        {node.description && (
-                            <p className="node-desc">{node.description}</p>
-                        )}
-                        {node.lat != null && node.long != null && (
-                            <span className="coords">
-                                📍 {node.lat.toFixed(4)}, {node.long.toFixed(4)}
-                            </span>
-                        )}
-                    </div>
-                ))}
+                                Edit Plan
+                            </button>
+                        )
+                    )}
+                    {tripId && (
+                        <span className="trip-badge">Trip: {tripId.slice(0, 8)}…</span>
+                    )}
+                </div>
             </div>
+            {saveError && (
+                <p style={{ color: "#dc2626", fontSize: "0.8rem", marginBottom: "0.5rem" }}>
+                    {saveError}
+                </p>
+            )}
+            {reasoningSection}
+            {isEditing ? (
+                <DndContext
+                    sensors={sensors}
+                    collisionDetection={closestCenter}
+                    onDragStart={handleDragStart}
+                    onDragEnd={(e) => { handleDragEnd(e); setActiveDragId(null); }}
+                >
+                    <div className="day-groups">
+                        {editedDayGroups.map((group, dayIndex) => {
+                            const ids = group.items.map((_, i) => `${group.key}::${i}`);
+                            return (
+                                <section className="day-group" key={group.key}>
+                                    <header className="day-group-header">
+                                        <div>
+                                            <p className="day-group-kicker">Day {dayIndex + 1}</p>
+                                            <h3 className="day-group-title">{group.key}</h3>
+                                            <p className="day-group-meta">{group.items.length} activities</p>
+                                        </div>
+                                    </header>
+                                    <SortableContext items={ids} strategy={verticalListSortingStrategy}>
+                                        <div className="nodes-grid day-nodes-grid">
+                                            {group.items.map((node, i) => (
+                                                <SortableCard
+                                                    key={`${group.key}-${i}`}
+                                                    id={`${group.key}::${i}`}
+                                                    node={node}
+                                                    onNodeChange={(updated) =>
+                                                        updateEditedNode(updated, group.key, i)
+                                                    }
+                                                />
+                                            ))}
+                                        </div>
+                                    </SortableContext>
+                                </section>
+                            );
+                        })}
+                    </div>
+                    <DragOverlay dropAnimation={null}>
+                        {activeDragId ? (() => {
+                            const [date, idxStr] = activeDragId.split("::");
+                            const idx = parseInt(idxStr, 10);
+                            const group = editedDayGroups.find((g) => g.key === date);
+                            const node = group?.items[idx];
+                            return node ? (
+                                <div
+                                    className="node-card day-node-card"
+                                    style={{
+                                        boxShadow: "0 16px 40px rgba(14, 165, 233, 0.3)",
+                                        border: "2px solid #0ea5e9",
+                                        transform: "rotate(1.5deg) scale(1.02)",
+                                        cursor: "grabbing",
+                                        background: "#f0f9ff",
+                                    }}
+                                >
+                                    <div style={{ fontSize: "0.72rem", color: "#0ea5e9", marginBottom: "0.25rem", fontWeight: 600 }}>
+                                        ⠿ Moving…
+                                    </div>
+                                    <div style={{ fontWeight: 600, fontSize: "0.95rem", color: "#0f172a" }}>
+                                        {node.title}
+                                    </div>
+                                    <div style={{ fontSize: "0.78rem", color: "#64748b", marginTop: "0.2rem" }}>
+                                        {node.start_time_local} – {node.end_time_local}
+                                        {node.duration_mins ? ` · ${node.duration_mins}min` : ""}
+                                    </div>
+                                </div>
+                            ) : null;
+                        })() : null}
+                    </DragOverlay>
+                </DndContext>
+            ) : (
+                <div className="day-groups">
+                    {dayGroups.map((group, dayIndex) => (
+                        <section className="day-group" key={group.key}>
+                            <header className="day-group-header">
+                                <div>
+                                    <p className="day-group-kicker">Day {dayIndex + 1}</p>
+                                    <h3 className="day-group-title">{group.label}</h3>
+                                    <p className="day-group-meta">
+                                        {group.items.length} activities
+                                        {group.totalDuration > 0
+                                            ? ` • ${group.totalDuration} min planned`
+                                            : " • duration TBD"}
+                                    </p>
+                                </div>
+                                <span
+                                    className={`day-group-window ${!group.earliest && !group.latest ? "is-unscheduled" : ""}`}
+                                >
+                                    {group.earliest || group.latest
+                                        ? `${group.earliest ?? "??:??"} - ${group.latest ?? "??:??"}`
+                                        : "No fixed times"}
+                                </span>
+                            </header>
+
+                            <div className="nodes-grid day-nodes-grid">
+                                {group.items.map((node, index) => (
+                                    <div
+                                        className={`node-card day-node-card ${isFillerNode(node) ? "is-filler-node" : ""}`}
+                                        key={`${group.key}-${node.title}-${index}`}
+                                    >
+                                        <div className="schedule-row">
+                                            <span className="schedule-time">
+                                                {node.start_time_local || node.end_time_local
+                                                    ? `${node.start_time_local ?? "??:??"} - ${node.end_time_local ?? "??:??"}`
+                                                    : "Flexible timing"}
+                                            </span>
+                                        </div>
+                                        <div className="node-card-header">
+                                            <span
+                                                className="activity-badge"
+                                                style={{
+                                                    backgroundColor:
+                                                        TYPE_COLORS[node.activity_type] ??
+                                                        "#94a3b8",
+                                                }}
+                                            >
+                                                {node.activity_type}
+                                            </span>
+                                            {node.segment_origin === "synthetic" && (
+                                                <span className="synthetic-pill">
+                                                    Auto-filled {node.segment_kind ?? "segment"}
+                                                </span>
+                                            )}
+                                            {node.duration_mins && (
+                                                <span className="duration-pill">
+                                                    ⏱ {node.duration_mins} min
+                                                </span>
+                                            )}
+                                        </div>
+                                        <h3 className="node-title">{node.title}</h3>
+                                        {node.description && (
+                                            <p className="node-desc">{node.description}</p>
+                                        )}
+                                        {node.lat != null && node.long != null && (
+                                            <span className="coords">
+                                                📍 {node.lat.toFixed(4)}, {node.long.toFixed(4)}
+                                            </span>
+                                        )}
+                                    </div>
+                                ))}
+                            </div>
+                        </section>
+                    ))}
+                </div>
+            )}
             {debugSection}
         </div>
     );
@@ -448,4 +1239,204 @@ function formatCitation(url: string): string {
     } catch {
         return url;
     }
+}
+
+function formatDateLabel(value: string): string {
+    if (value === "unscheduled") {
+        return "Unscheduled";
+    }
+
+    const parsed = new Date(`${value}T00:00:00`);
+    if (Number.isNaN(parsed.getTime())) {
+        return value;
+    }
+
+    return new Intl.DateTimeFormat(undefined, {
+        weekday: "short",
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+    }).format(parsed);
+}
+
+const THINKING_SUBSTAGES = [
+    {
+        icon: "🔍",
+        label: "Searching the web",
+        detail: "Building targeted queries and scanning sources",
+        duration: 9000,
+    },
+    {
+        icon: "📖",
+        label: "Reading pages",
+        detail: "Extracting planning facts from web sources",
+        duration: 11000,
+    },
+    {
+        icon: "🧠",
+        label: "Grounding evidence",
+        detail: "Cross-referencing facts and scheduling constraints",
+        duration: 9000,
+    },
+    {
+        icon: "✈️",
+        label: "Planning your itinerary",
+        detail: "Synthesizing evidence into a coherent day-by-day schedule",
+        duration: 13000,
+    },
+    {
+        icon: "📅",
+        label: "Building the schedule",
+        detail: "Arranging activities, timing, and transitions",
+        duration: 10000,
+    },
+    {
+        icon: "🔎",
+        label: "Reviewing the draft plan",
+        detail: "Checking timings, constraints, and completeness",
+        duration: 8000,
+    },
+    {
+        icon: "✍️",
+        label: "Improving the draft plan",
+        detail: "Applying self-review to produce a better itinerary",
+        duration: 9000,
+    },
+    {
+        icon: "✨",
+        label: "Almost there",
+        detail: "Validating, finalising, and preparing your plan",
+        duration: 99999,
+    },
+] as const;
+
+const FINAL_STAGE_PHRASES = [
+    { icon: "✨", label: "Almost there", detail: "Validating, finalising, and preparing your plan" },
+    { icon: "🗺️", label: "Polishing the details", detail: "Making sure every transition makes sense" },
+    { icon: "⏱️", label: "Double-checking timings", detail: "Ensuring the schedule flows smoothly" },
+    { icon: "🏨", label: "Verifying locations", detail: "Cross-checking places and distances" },
+    { icon: "✅", label: "Nearly ready", detail: "Putting the finishing touches on your itinerary" },
+] as const;
+
+function PlanningStatusCard({
+    loadingPhaseLabel,
+    loadingPhaseDetail,
+    loadingStepIndex,
+    loadingTotalSteps,
+}: {
+    loadingPhaseLabel?: string;
+    loadingPhaseDetail?: string;
+    loadingStepIndex?: number;
+    loadingTotalSteps?: number;
+}) {
+    const isThinking = loadingPhaseLabel?.toLowerCase().includes("thinking")
+        || loadingPhaseLabel?.toLowerCase().includes("parsing")
+        || loadingPhaseLabel?.toLowerCase().includes("grounding")
+        || loadingPhaseLabel?.toLowerCase().includes("building")
+        || loadingPhaseLabel?.toLowerCase().includes("model");
+
+    const [substageIndex, setSubstageIndex] = useState(0);
+    const [visible, setVisible] = useState(true);
+    const [finalPhraseIndex, setFinalPhraseIndex] = useState(0);
+    const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const finalTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+    const isLastStage = substageIndex === THINKING_SUBSTAGES.length - 1;
+
+    useEffect(() => {
+        if (!isThinking) {
+            setSubstageIndex(0);
+            setVisible(true);
+            return;
+        }
+
+        let current = 0;
+        setSubstageIndex(0);
+        setVisible(true);
+
+        const advance = () => {
+            setVisible(false);
+            setTimeout(() => {
+                current = Math.min(current + 1, THINKING_SUBSTAGES.length - 1);
+                setSubstageIndex(current);
+                setVisible(true);
+                if (current < THINKING_SUBSTAGES.length - 1) {
+                    timerRef.current = setTimeout(advance, THINKING_SUBSTAGES[current].duration);
+                }
+            }, 350);
+        };
+
+        timerRef.current = setTimeout(advance, THINKING_SUBSTAGES[0].duration);
+
+        return () => {
+            if (timerRef.current) clearTimeout(timerRef.current);
+        };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [isThinking]);
+
+    useEffect(() => {
+        if (!isLastStage) {
+            if (finalTimerRef.current) {
+                clearInterval(finalTimerRef.current);
+                finalTimerRef.current = null;
+            }
+            setFinalPhraseIndex(0);
+            return;
+        }
+        finalTimerRef.current = setInterval(() => {
+            setVisible(false);
+            setTimeout(() => {
+                setFinalPhraseIndex(i => (i + 1) % FINAL_STAGE_PHRASES.length);
+                setVisible(true);
+            }, 350);
+        }, 4500);
+        return () => {
+            if (finalTimerRef.current) {
+                clearInterval(finalTimerRef.current);
+                finalTimerRef.current = null;
+            }
+        };
+    }, [isLastStage]);
+
+    if (isThinking) {
+        const substage = isLastStage
+            ? FINAL_STAGE_PHRASES[finalPhraseIndex]
+            : THINKING_SUBSTAGES[substageIndex];
+        return (
+            <div className="planning-thinking-card">
+                <div className="thinking-glow" />
+                <div className="thinking-top-row">
+                    <span className={`thinking-icon ${visible ? "thinking-fade-in" : "thinking-fade-out"}`}>
+                        {substage.icon}
+                    </span>
+                    <div className="thinking-dots">
+                        <span /><span /><span />
+                    </div>
+                </div>
+                <p className={`thinking-label ${visible ? "thinking-fade-in" : "thinking-fade-out"}`}>
+                    {substage.label}
+                </p>
+                <p className={`thinking-detail ${visible ? "thinking-fade-in" : "thinking-fade-out"}`}>
+                    {substage.detail}
+                </p>
+            </div>
+        );
+    }
+
+    return (
+        <div className="planning-status-banner">
+            <p className="planning-status-kicker">
+                Planner in progress
+                {typeof loadingStepIndex === "number"
+                    && typeof loadingTotalSteps === "number"
+                    ? ` • Step ${loadingStepIndex + 1} of ${loadingTotalSteps}`
+                    : ""}
+            </p>
+            <p className="planning-status-title">
+                {loadingPhaseLabel ?? "Generating itinerary"}
+            </p>
+            <p className="planning-status-detail">
+                {loadingPhaseDetail ?? "Running planning pipeline..."}
+            </p>
+        </div>
+    );
 }

@@ -4,8 +4,12 @@ Media worker: convert uploaded media metadata into evidence placeholders.
 
 from __future__ import annotations
 
+import logging
+
 from models import EvidenceFacts, EvidenceItem
 from services.openrouter import MediaInput
+
+logger = logging.getLogger(__name__)
 
 
 def run_media_context_worker(media_inputs: list[MediaInput]) -> list[EvidenceItem]:
@@ -16,6 +20,18 @@ def run_media_context_worker(media_inputs: list[MediaInput]) -> list[EvidenceIte
     artifacts for downstream multimodal reasoning while preserving file context.
     """
     evidence: list[EvidenceItem] = []
+    logger.info(
+        "media_worker input: media_count=%s media=%s",
+        len(media_inputs),
+        [
+            {
+                "filename": media.filename,
+                "mime_type": media.mime_type,
+                "data_url_chars": len(media.data_url or ""),
+            }
+            for media in media_inputs[:8]
+        ],
+    )
 
     for index, media in enumerate(media_inputs, start=1):
         source_type = "upload_video" if media.mime_type.startswith("video/") else "upload_image"
