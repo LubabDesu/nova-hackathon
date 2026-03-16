@@ -13,6 +13,7 @@ export interface ItineraryNode {
     description: string | null;
     segment_origin?: "model" | "synthetic" | null;
     segment_kind?: "activity" | "transfer" | "buffer" | "rest" | null;
+    for_travelers?: string[];
 }
 
 export interface ProcessIdeaResponse {
@@ -304,4 +305,114 @@ export interface ScaffoldReadyEvent {
     scaffold_text: string;
     revision_count: number;
     max_revisions: number;
+    scratchpad?: string;  // Agent's planning notes
+}
+
+// ── Agent action events (real-time tool calls during planning) ───────────────
+export interface AgentActionEvent {
+    tool_name:
+        | "search_activities"
+        | "get_local_events"
+        | "get_weather"
+        | "validate_place"
+        | "write_to_scratchpad"
+        | "self_critique_plan"
+        | "ask_user"
+        | "finalize_plan";
+    summary: string;
+    reasoning?: string;
+    result_preview?: string;
+    tool_input?: Record<string, unknown>;  // full input for debugging
+    elapsed_ms?: number;                   // tool execution time in ms
+    iteration?: number;                    // which agent iteration called this
+    scratchpad?: string;                   // current agent scratchpad state
+}
+
+// ── Agent question events (ask_user tool) ────────────────────────────────────
+export interface AgentQuestionOption {
+    id: string;
+    label: string;
+}
+
+export interface AgentQuestionEvent {
+    request_id: string;   // key for answer endpoint
+    question_id: string;
+    question: string;
+    options: AgentQuestionOption[];
+}
+
+// ── Booking HITL auth pause ───────────────────────────────────────────────────
+export interface NeedsAuthEvent {
+    type: "needs_auth";
+    message: string;
+    auth_url?: string | null;
+}
+
+// ── Booking HITL course review pause ─────────────────────────────────────────
+export interface NeedsCourseReviewEvent {
+    type: "needs_course_review";
+    message: string;
+    summary: string;
+}
+
+// ── Group trip types ──────────────────────────────────────────────────────────
+export interface GroupTrip {
+    id: string;
+    name: string;
+    trip_location?: string;
+    start_date?: string;
+    end_date?: string;
+    trip_days?: number;
+    trip_type: "individual" | "group";
+    max_travelers: number;
+    created_at?: string;
+}
+
+export interface TravelerParticipant {
+    nickname: string;
+    submitted_at: string;
+    free_text?: string | null;
+    input_directives?: {
+        budget_level?: string | null;
+        pace?: string | null;
+        dietary?: string[];
+        wake_time_pref?: string | null;
+        must_include?: string[];
+        avoid?: string[];
+        hard_constraints?: string[];
+        soft_preferences?: string[];
+        inspiration_links?: string[];
+        [key: string]: unknown;
+    } | null;
+}
+
+export interface GroupPlanStatusResponse {
+    group_id: string;
+    destination?: string;
+    participants: TravelerParticipant[];
+    slots_remaining?: number;
+}
+
+export interface ConflictItem {
+    field: string;
+    values: string[];
+    travelers: string[];
+}
+
+// Alias for backwards compatibility
+export type GroupPlanStatus = GroupPlanStatusResponse;
+
+export interface InputDirectivesGroup {
+    hard_constraints: string[];
+    soft_preferences: string[];
+    must_include: string[];
+    avoid: string[];
+    mobility_mode?: string;
+    budget_level?: string;
+    pace?: string;
+    travel_party: string[];
+    dietary: string[];
+    wake_time_pref?: string;
+    fitness_level?: string;
+    accommodation_style?: string;
 }

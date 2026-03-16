@@ -7,8 +7,16 @@ import type {
     ScaffoldReadyEvent,
     UrlScraperDebugResponse,
 } from "../types";
+import { supabase } from "../lib/supabase";
 
-const API_BASE = "http://localhost:8000/api";
+async function getAuthHeaders(): Promise<Record<string, string>> {
+    const { data: { session } } = await supabase.auth.getSession();
+    return session?.access_token
+        ? { Authorization: `Bearer ${session.access_token}` }
+        : {};
+}
+
+const API_BASE = import.meta.env.VITE_API_BASE ?? "http://localhost:8000/api";
 
 interface ProcessIdeaOptions {
     tripId?: string;
@@ -221,7 +229,7 @@ export async function planIdeaStream(
     const res = await fetch(`${API_BASE}/ideas/plan`, {
         method: "POST",
         body: formData,
-        headers: { Accept: "text/event-stream" },
+        headers: { Accept: "text/event-stream", ...(await getAuthHeaders()) },
     });
 
     if (!res.ok) {
@@ -272,6 +280,19 @@ export async function planIdeaStream(
 }
 
 /**
+ * Cancel an in-progress /api/ideas/plan generation by request_id.
+ * The request_id comes from the 'accepted' SSE event.
+ */
+export async function cancelPlanningRequest(requestId: string): Promise<void> {
+    const headers = await getAuthHeaders();
+    await fetch(`${API_BASE}/ideas/plan/cancel`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...headers },
+        body: JSON.stringify({ request_id: requestId }),
+    });
+}
+
+/**
  * Calls /api/ideas/revise (JSON). Returns revised scaffold text + updated revision count.
  */
 export async function reviseScaffold(
@@ -281,7 +302,7 @@ export async function reviseScaffold(
 ): Promise<{ scaffold_text: string; revision_count: number }> {
     const res = await fetch(`${API_BASE}/ideas/revise`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...(await getAuthHeaders()) },
         body: JSON.stringify({
             session_id: sessionId,
             scaffold_text: scaffoldText,
@@ -311,6 +332,7 @@ export async function extractIdeaStream(
         headers: {
             "Content-Type": "application/json",
             Accept: "text/event-stream",
+            ...(await getAuthHeaders()),
         },
         body: JSON.stringify({
             session_id: sessionId,
@@ -425,4 +447,43 @@ export async function reoptimizeTimings(
         throw new Error(err.detail ?? "Re-optimize failed");
     }
     return res.json() as Promise<ReoptimizeResult>;
+}
+
+export async function createGroupTrip(data: {
+    name: string;
+    trip_location?: string | null;
+    trip_days?: number;
+    max_travelers?: number;
+}): Promise<{ group_id: string; join_url: string }> {
+    const headers = { ...(await getAuthHeaders()), "Content-Type": "application/json" };
+    const res = await fetch(`${API_BASE}/group-trips/create`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(data),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
+}
+
+export async function getGroupTripStatus(groupId: string): Promise<import("../types").GroupPlanStatus> {
+    const headers = await getAuthHeaders();
+    const res = await fetch(`${API_BASE}/group-trips/${groupId}/status`, { headers });
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
+}
+
+export async function joinGroupTrip(groupId: string, data: {
+    nickname: string;
+    free_text?: string;
+    input_directives?: Record<string, unknown>;
+}): Promise<void> {
+    const res = await fetch(`${API_BASE}/group-trips/${groupId}/join`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: "Unknown error" }));
+        throw new Error(err.detail);
+    }
 }

@@ -6,7 +6,7 @@ interface AuthContextValue {
     user: User | null;
     session: Session | null;
     loading: boolean;
-    signInWithGoogle: () => Promise<void>;
+    signInWithGoogle: (credential: string) => Promise<void>;
     signOut: () => Promise<void>;
 }
 
@@ -18,8 +18,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-        // getSession() establishes the session on first load (reads from localStorage).
-        // The OAuth hash exchange is handled by the dedicated /auth/callback page.
         supabase.auth.getSession().then(({ data: { session } }) => {
             setSession(session);
             setUser(session?.user ?? null);
@@ -34,11 +32,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return () => subscription.unsubscribe();
     }, []);
 
-    const signInWithGoogle = async () => {
-        await supabase.auth.signInWithOAuth({
+    const signInWithGoogle = async (credential: string) => {
+        const { error } = await supabase.auth.signInWithIdToken({
             provider: "google",
-            options: { redirectTo: `${window.location.origin}/auth/callback` },
+            token: credential,
         });
+        if (error) throw error;
     };
 
     const signOut = async () => {

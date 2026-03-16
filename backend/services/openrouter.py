@@ -52,8 +52,10 @@ EXTRACT_TOOL = {
                                 "type": "string",
                                 "description": (
                                     "Category of the activity. One of: "
-                                    "sightseeing, hiking, food, transport, "
-                                    "accommodation, adventure, culture, shopping, relaxation"
+                                    "sightseeing, hiking, restaurant, food, transport, "
+                                    "accommodation, adventure, culture, shopping, relaxation. "
+                                    "Use 'restaurant' for any dining, café, izakaya, sushi, "
+                                    "ramen, or food-related activity so booking can be offered."
                                 ),
                             },
                             "duration_mins": {
@@ -162,7 +164,7 @@ SYSTEM_PROMPT = (
     "Do not merge days together or move activities across dates.\n"
     "- Reproduce start_time_local and end_time_local from the plan exactly. "
     "Do not round times to the nearest hour or shift them for any reason.\n"
-    "- Never schedule activities past 22:00. If a day runs out of time, "
+    "-  More often than not, avoid scheduling activities past 22:00 unless the plan explicitly calls for it. If a day runs out of time, "
     "the remaining activities belong on the next date — do not overflow into the night.\n"
     "- A node with start_time_local == end_time_local (e.g. 23:59–23:59) is invalid. "
     "If you would produce one, it means the day is over-scheduled — stop adding nodes to that date.\n"
@@ -171,6 +173,7 @@ SYSTEM_PROMPT = (
     "- Write concise 1-2 sentence descriptions grounded in the plan.\n"
     "- Do NOT invent activities not present in the plan or evidence."
 )
+
 
 MEDIA_CONTEXT_SYSTEM_PROMPT = (
     "You are NovaSync vision context extractor. "
@@ -192,6 +195,7 @@ QUERY_BUILDER_SYSTEM_PROMPT = (
     "Use search-string style (keyword phrases), not full-sentence questions. "
     "Avoid generic wording like 'romantic trip', 'how to', 'find', or 'check' unless no concrete entity exists. "
     "If named places or activities are present, anchor queries to them. "
+    "Consider appending Reddit to the query to find more real-life experiences and tips. "
     "Return concise high-value search queries for itinerary grounding. "
     "Output strict JSON only, no markdown, no prose. "
     'Schema: {"queries":[{"q":"string","intent":"official_site|hours|booking|best_time|safety|transport|food|activities"}]}. '
@@ -205,16 +209,22 @@ QUERY_BUILDER_SYSTEM_PROMPT = (
 
 PLANNING_SCAFFOLD_SYSTEM_PROMPT = (
     "You are NovaSync itinerary strategist. "
-    "Produce a concise natural-language draft itinerary scaffold before JSON extraction. "
-    "Do not reveal hidden reasoning and do not output chain-of-thought. "
-    "Output only an actionable plan outline with these sections:\n"
-    "1) Trip frame (1-2 lines)\n"
-    "2) Day-by-day bullets with time windows and activity flow\n"
-    "3) Constraint checks (hard constraints, avoid, safety)\n"
-    "4) Open questions/assumptions (if any)\n"
-    "Keep it compact, specific, and evidence-grounded."
-    "Verbalise your reasoning process before outputting the JSON, first start off by considering must-do activites in the location of travel"
-    "ensure the plan is contextually relevant to the user's input."
+    "Produce a compact day-by-day itinerary scaffold for human review before JSON extraction. "
+    "Do not output chain-of-thought, time windows, or detailed flow — just what happens on each day. "
+    "Output format:\n"
+    "Trip overview: [1-2 sentences summarising the trip]\n\n"
+    "Day N (Weekday, Mon DD) (Focus of the day if there is one): Activity · Activity · Activity\n"
+    "(repeat for each day)\n\n"
+    "Notes: [any important scheduling notes, e.g. early start needed, day trip logistics]\n"
+    "Open questions: [any assumptions that need user confirmation, or omit if none]\n\n"
+    "Rules:\n"
+    "- Use · as separator between activities on the same day\n"
+    "- Include day trips as a single line entry\n"
+    "- Keep each day line under 100 characters\n"
+    "- No times, no durations, no detailed flow\n"
+    "- Be specific with place names\n"
+    "- Respect all hard constraints and avoid items\n"
+    "- Ensure must-include items appear on appropriate days"
 )
 
 
@@ -666,6 +676,7 @@ def extract_itinerary(
 def build_planning_scaffold(
     *,
     scaffold_prompt: str,
+    group_travelers: list[str] | None = None,
 ) -> tuple[str | None, dict[str, Any]]:
     """
     Generate a concise natural-language itinerary scaffold before JSON extraction.
@@ -706,6 +717,13 @@ def build_planning_scaffold(
     )
 
     prompt_text = scaffold_prompt.strip()
+    if group_travelers:
+        names = ", ".join(group_travelers)
+        prompt_text += (
+            f"\n\nFor each activity in the itinerary, set the `for_travelers` field to a list of "
+            f"traveler names it primarily serves. Available travelers: {names}. "
+            "If an activity suits everyone, include all names."
+        )
     prompt_text_for_model = prompt_text[:prompt_max_chars]
     prompt_was_truncated = len(prompt_text_for_model) < len(prompt_text)
 
@@ -1058,6 +1076,117 @@ def revise_planning_scaffold(
 
     debug: dict[str, Any] = {
         "revise_model_requested": primary_model,
+        "timeout_seconds": timeout_seconds,
+        "revised_chars": len(revised_text or ""),
+        "error": error,
+        "attempts": attempts,
+    }
+    return revised_text, debug
+
+
+def revise_scaffold_with_feedback(
+    *,
+    original_scaffold: str,
+    user_feedback: str,
+    idea_text: str,
+    input_directives: Any,
+    start_date: Any,
+    end_date: Any,
+) -> tuple[str | None, dict[str, Any]]:
+    """
+    Revise a planning scaffold based on direct user feedback.
+
+    Returns revised text plus debug metadata. Fails open — returns None on error.
+    """
+    api_key = os.environ.get("OPENROUTER_API_KEY", "").strip()
+    if not api_key:
+        return None, {"error": "OPENROUTER_API_KEY is not set."}
+
+    primary_model = os.environ.get("OPENROUTER_COT_MODEL", "").strip()
+    if not primary_model:
+        primary_model = os.environ.get("OPENROUTER_MODEL", "openrouter/free").strip()
+    models = _resolve_scaffold_models(primary_model)
+
+    timeout_seconds_raw = os.environ.get("OPENROUTER_CRITIQUE_TIMEOUT_SECONDS", "20")
+    try:
+        timeout_seconds = float(timeout_seconds_raw)
+    except ValueError:
+        timeout_seconds = 20.0
+    timeout_seconds = max(5.0, min(timeout_seconds, 90.0))
+
+    date_range = ""
+    if start_date and end_date:
+        date_range = f"{start_date} to {end_date}"
+
+    user_prompt = (
+        f"The user reviewed the draft plan and said: '{user_feedback}'\n\n"
+        "Revise the plan accordingly, keeping the same compact format.\n\n"
+        f"Original plan:\n{original_scaffold[:2600]}\n\n"
+        f"User request context: {idea_text[:400]}\n"
+        f"Trip dates: {date_range or 'not specified'}\n\n"
+        "Output the revised plan in the same compact Day-by-Day format. "
+        "Keep the same structure: Trip overview, Day N lines, Notes, Open questions. "
+        "Only change what the user asked to change."
+    )
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+
+    revised_text: str | None = None
+    error: str | None = None
+    attempts: list[dict[str, Any]] = []
+
+    output_max_chars = _env_int(
+        "OPENROUTER_COT_OUTPUT_MAX_CHARS",
+        2400,
+        min_value=300,
+        max_value=8000,
+    )
+
+    with httpx.Client(timeout=timeout_seconds) as client:
+        for model in models:
+            attempt: dict[str, Any] = {"model": model}
+            payload: dict[str, Any] = {
+                "model": model,
+                "messages": [
+                    {"role": "system", "content": PLANNING_SCAFFOLD_SYSTEM_PROMPT},
+                    {"role": "user", "content": user_prompt},
+                ],
+                "temperature": 0.2,
+            }
+            logger.info(
+                "revise_scaffold_with_feedback: purpose=feedback_revise model=%s",
+                model,
+            )
+            try:
+                data = _post_openrouter(client=client, payload=payload, headers=headers, purpose="feedback_revise")
+                raw_text = _message_content_to_text(data)
+                candidate = _sanitize_planning_scaffold(raw_text)
+                attempt["status"] = "ok"
+                attempt["response_model"] = data.get("model")
+                attempt["revised_chars"] = len(candidate)
+                attempts.append(attempt)
+                if candidate:
+                    revised_text = candidate[:output_max_chars]
+                    break
+                error = "Feedback revise model returned empty text."
+            except httpx.HTTPStatusError as exc:
+                detail = exc.response.text[:1500]
+                error = f"HTTP {exc.response.status_code} (model={model})"
+                attempt["status"] = "http_error"
+                attempt["http_status"] = exc.response.status_code
+                attempt["error_body_excerpt"] = detail
+                attempts.append(attempt)
+            except Exception as exc:  # noqa: BLE001
+                error = str(exc)
+                attempt["status"] = "exception"
+                attempt["error"] = str(exc)
+                attempts.append(attempt)
+
+    debug: dict[str, Any] = {
+        "feedback_revise_model_requested": primary_model,
         "timeout_seconds": timeout_seconds,
         "revised_chars": len(revised_text or ""),
         "error": error,

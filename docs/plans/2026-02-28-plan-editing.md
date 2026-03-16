@@ -15,6 +15,7 @@
 The DB assigns a UUID to every node on insert; the frontend needs it to upsert edits later. Currently `ItineraryNode` has no `id` field anywhere in the stack.
 
 **Files:**
+
 - Modify: `backend/models.py` (around line 100 — the `ItineraryNode` class)
 - Modify: `frontend/src/types.ts:3-15`
 
@@ -78,6 +79,7 @@ git commit -m "feat: add id field to ItineraryNode and propagate through API res
 ## Task 2: Add `update_nodes` to `supabase_client.py`
 
 **Files:**
+
 - Modify: `backend/services/supabase_client.py`
 
 **Step 1: Add the update helper**
@@ -122,6 +124,7 @@ git commit -m "feat: add update_nodes upsert helper to supabase_client"
 ## Task 3: Add two new backend endpoints
 
 **Files:**
+
 - Modify: `backend/routes/ideas.py`
 - Modify: `backend/models.py` (add request models)
 
@@ -145,6 +148,7 @@ class ReoptimizeTimingsRequest(BaseModel):
 **Step 2: Add the save endpoint to `backend/routes/ideas.py`**
 
 Import `update_nodes` at the top of `routes/ideas.py`:
+
 ```python
 from services.supabase_client import create_trip, insert_nodes, update_nodes
 ```
@@ -169,7 +173,7 @@ async def bulk_update_nodes(trip_id: str, body: BulkUpdateNodesRequest):
 
 Add this endpoint immediately after the one above:
 
-```python
+````python
 @router.post("/trips/{trip_id}/reoptimize-timings")
 async def reoptimize_timings(trip_id: str, body: ReoptimizeTimingsRequest):
     """Use a lightweight model to assign plausible times to activities."""
@@ -219,11 +223,12 @@ async def reoptimize_timings(trip_id: str, body: ReoptimizeTimingsRequest):
         raise HTTPException(status_code=502, detail=f"Model returned invalid JSON: {content[:200]}") from exc
 
     return JSONResponse(result)
-```
+````
 
 **Step 4: Import `BulkUpdateNodesRequest` and `ReoptimizeTimingsRequest` in routes**
 
 In `routes/ideas.py`, update the models import:
+
 ```python
 from models import (
     BulkUpdateNodesRequest,
@@ -267,6 +272,7 @@ git commit -m "feat: add bulk-update-nodes and reoptimize-timings endpoints"
 ## Task 4: Install `@dnd-kit` and create `repackDay` utility
 
 **Files:**
+
 - Create: `frontend/src/utils/itineraryUtils.ts`
 
 **Step 1: Install DnD libraries**
@@ -350,6 +356,7 @@ git commit -m "feat: add repackDay utility and install @dnd-kit"
 ## Task 5: Add edit mode state and API functions
 
 **Files:**
+
 - Modify: `frontend/src/services/api.ts`
 - Modify: `frontend/src/types.ts`
 
@@ -378,14 +385,25 @@ export async function saveEditedNodes(
 export interface ReoptimizeResult {
     days: Array<{
         date: string;
-        activities: Array<{ title: string; start_time_local: string; end_time_local: string }>;
+        activities: Array<{
+            title: string;
+            start_time_local: string;
+            end_time_local: string;
+        }>;
     }>;
 }
 
 /** Ask the lightweight model to assign plausible times to the current activity list. */
 export async function reoptimizeTimings(
     tripId: string,
-    dayGroups: Array<{ date: string; activities: Array<{ title: string; activity_type: string; duration_mins: number | null }> }>,
+    dayGroups: Array<{
+        date: string;
+        activities: Array<{
+            title: string;
+            activity_type: string;
+            duration_mins: number | null;
+        }>;
+    }>,
     wakeTime = "09:00",
 ): Promise<ReoptimizeResult> {
     const res = await fetch(`${API_BASE}/trips/${tripId}/reoptimize-timings`, {
@@ -423,6 +441,7 @@ git commit -m "feat: add saveEditedNodes and reoptimizeTimings API functions"
 This is the largest task. Add edit mode toggle, edit state, and the "Edit Plan" / "Save Changes" header buttons.
 
 **Files:**
+
 - Modify: `frontend/src/components/ResultDisplay.tsx`
 
 **Step 1: Add imports at the top of `ResultDisplay.tsx`**
@@ -518,7 +537,9 @@ After `editedDayGroups`, add:
 ```typescript
 const sensors = useSensors(
     useSensor(PointerSensor),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+    useSensor(KeyboardSensor, {
+        coordinateGetter: sortableKeyboardCoordinates,
+    }),
 );
 
 function handleDragEnd(event: DragEndEvent) {
@@ -654,8 +675,9 @@ Find the `result-header` div (around line 704):
                 {isReoptimizing ? "Optimizing…" : "Re-optimize timings"}
             </button>
         )}
-        {nodes.length > 0 && tripId && (
-            isEditing ? (
+        {nodes.length > 0 &&
+            tripId &&
+            (isEditing ? (
                 <>
                     <button
                         type="button"
@@ -683,18 +705,25 @@ Find the `result-header` div (around line 704):
                 >
                     Edit Plan
                 </button>
-            )
-        )}
+            ))}
         {tripId && (
             <span className="trip-badge">Trip: {tripId.slice(0, 8)}…</span>
         )}
     </div>
-</div>
-{saveError && (
-    <p style={{ color: "#dc2626", fontSize: "0.8rem", marginBottom: "0.5rem" }}>
-        {saveError}
-    </p>
-)}
+</div>;
+{
+    saveError && (
+        <p
+            style={{
+                color: "#dc2626",
+                fontSize: "0.8rem",
+                marginBottom: "0.5rem",
+            }}
+        >
+            {saveError}
+        </p>
+    );
+}
 ```
 
 **Step 9: Commit**
@@ -709,6 +738,7 @@ git commit -m "feat: add edit mode state, drag handlers, save/reoptimize logic t
 ## Task 7: Render editable day groups with DnD
 
 **Files:**
+
 - Modify: `frontend/src/components/ResultDisplay.tsx`
 
 This step replaces the read-mode `day-groups` render with a conditional that shows either read mode or edit mode.
@@ -727,8 +757,14 @@ function SortableCard({
     node: ItineraryNode;
     onNodeChange: (updated: ItineraryNode) => void;
 }) {
-    const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
-        useSortable({ id });
+    const {
+        attributes,
+        listeners,
+        setNodeRef,
+        transform,
+        transition,
+        isDragging,
+    } = useSortable({ id });
 
     const style: React.CSSProperties = {
         transform: CSS.Transform.toString(transform),
@@ -738,42 +774,87 @@ function SortableCard({
     };
 
     return (
-        <div
-            ref={setNodeRef}
-            style={style}
-            className="node-card day-node-card"
-        >
+        <div ref={setNodeRef} style={style} className="node-card day-node-card">
             {/* Drag handle */}
             <div
                 {...attributes}
                 {...listeners}
-                style={{ cursor: "grab", fontSize: "0.75rem", color: "#94a3b8", marginBottom: "0.4rem", userSelect: "none" }}
+                style={{
+                    cursor: "grab",
+                    fontSize: "0.75rem",
+                    color: "#94a3b8",
+                    marginBottom: "0.4rem",
+                    userSelect: "none",
+                }}
             >
                 ⠿ drag to reorder
             </div>
 
             {/* Time row */}
-            <div className="schedule-row" style={{ gap: "0.5rem", flexWrap: "wrap" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: "0.3rem" }}>
-                    <label style={{ fontSize: "0.72rem", color: "#64748b" }}>Start</label>
+            <div
+                className="schedule-row"
+                style={{ gap: "0.5rem", flexWrap: "wrap" }}
+            >
+                <div
+                    style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "0.3rem",
+                    }}
+                >
+                    <label style={{ fontSize: "0.72rem", color: "#64748b" }}>
+                        Start
+                    </label>
                     <input
                         type="time"
                         value={node.start_time_local ?? ""}
-                        onChange={(e) => onNodeChange({ ...node, start_time_local: e.target.value })}
-                        style={{ fontSize: "0.78rem", border: "1px solid #e2e8f0", borderRadius: "4px", padding: "0.1rem 0.3rem" }}
+                        onChange={(e) =>
+                            onNodeChange({
+                                ...node,
+                                start_time_local: e.target.value,
+                            })
+                        }
+                        style={{
+                            fontSize: "0.78rem",
+                            border: "1px solid #e2e8f0",
+                            borderRadius: "4px",
+                            padding: "0.1rem 0.3rem",
+                        }}
                     />
                 </div>
-                <div style={{ display: "flex", alignItems: "center", gap: "0.3rem" }}>
-                    <label style={{ fontSize: "0.72rem", color: "#64748b" }}>Duration</label>
+                <div
+                    style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "0.3rem",
+                    }}
+                >
+                    <label style={{ fontSize: "0.72rem", color: "#64748b" }}>
+                        Duration
+                    </label>
                     <input
                         type="number"
                         min={5}
                         step={5}
                         value={node.duration_mins ?? ""}
-                        onChange={(e) => onNodeChange({ ...node, duration_mins: parseInt(e.target.value, 10) || null })}
-                        style={{ width: "4rem", fontSize: "0.78rem", border: "1px solid #e2e8f0", borderRadius: "4px", padding: "0.1rem 0.3rem" }}
+                        onChange={(e) =>
+                            onNodeChange({
+                                ...node,
+                                duration_mins:
+                                    parseInt(e.target.value, 10) || null,
+                            })
+                        }
+                        style={{
+                            width: "4rem",
+                            fontSize: "0.78rem",
+                            border: "1px solid #e2e8f0",
+                            borderRadius: "4px",
+                            padding: "0.1rem 0.3rem",
+                        }}
                     />
-                    <span style={{ fontSize: "0.72rem", color: "#64748b" }}>min</span>
+                    <span style={{ fontSize: "0.72rem", color: "#64748b" }}>
+                        min
+                    </span>
                 </div>
             </div>
 
@@ -781,7 +862,9 @@ function SortableCard({
             <input
                 type="text"
                 value={node.title}
-                onChange={(e) => onNodeChange({ ...node, title: e.target.value })}
+                onChange={(e) =>
+                    onNodeChange({ ...node, title: e.target.value })
+                }
                 style={{
                     width: "100%",
                     fontWeight: 600,
@@ -797,7 +880,9 @@ function SortableCard({
             {/* Editable description */}
             <textarea
                 value={node.description ?? ""}
-                onChange={(e) => onNodeChange({ ...node, description: e.target.value })}
+                onChange={(e) =>
+                    onNodeChange({ ...node, description: e.target.value })
+                }
                 rows={2}
                 style={{
                     width: "100%",
@@ -820,7 +905,11 @@ function SortableCard({
 Inside the `ResultDisplay` function, after the reoptimize handler, add:
 
 ```typescript
-function updateEditedNode(updated: ItineraryNode, dayKey: string, indexInDay: number) {
+function updateEditedNode(
+    updated: ItineraryNode,
+    dayKey: string,
+    indexInDay: number,
+) {
     setEditedNodes((prev) => {
         // Rebuild: find this node by dayKey + index, update it, then repack the day
         const byDay = new Map<string, ItineraryNode[]>();
@@ -909,6 +998,7 @@ git commit -m "feat: render editable DnD day groups with SortableCard in edit mo
 ## Task 8: Wire `onNodesChange` in `App.tsx`
 
 **Files:**
+
 - Modify: `frontend/src/App.tsx`
 
 **Step 1: Find where `ResultDisplay` is rendered (around line 1551) and add `onNodesChange`**
@@ -933,6 +1023,7 @@ cd frontend && npx tsc --noEmit
 ```
 
 Then open the browser, generate a plan, and:
+
 1. Click "Edit Plan" — filler nodes disappear, edit inputs appear on each card
 2. Drag a card to reorder — times update automatically
 3. Edit a title/description — text updates inline

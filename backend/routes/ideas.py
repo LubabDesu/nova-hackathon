@@ -10,12 +10,14 @@ import json
 import logging
 import mimetypes
 import os
+import queue as _queue
+import threading as _threading
 import time
 from typing import Any, AsyncGenerator
 from urllib.parse import urlparse
 from uuid import uuid4
 
-from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, ValidationError
 
@@ -28,6 +30,8 @@ from models import (
     ProcessIdeaResponse,
     ReoptimizeTimingsRequest,
     ReviseRequest,
+    TripChatRequest,
+    TripChatResponse,
 )
 from services.openrouter import MediaInput, revise_scaffold_with_feedback
 from services.orchestrator import (
@@ -41,6 +45,7 @@ from services.session_cache import PlanSession, delete_session, get_session, put
 from services.workers.url_worker import run_url_context_worker
 from services.supabase_client import create_trip, insert_nodes, update_nodes
 from services.evidence_builder import build_initial_evidence
+from services.auth import get_current_user
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +55,12 @@ ORCHESTRATION_TIMEOUT_SECONDS = float(
     os.getenv("ORCHESTRATION_TIMEOUT_SECONDS", "360")
 )
 DB_TIMEOUT_SECONDS = float(os.getenv("DB_TIMEOUT_SECONDS", "30"))
+_REVISION_BACKEND = os.getenv("REVISION_BACKEND", "nova").lower()
+
+# ── Active plan cancel registry ───────────────────────────────────────────────
+# Maps request_id → threading.Event. Caller sets the event to cancel the agent.
+_active_plan_cancels: dict[str, _threading.Event] = {}
+_active_plan_questions: dict[str, tuple[_threading.Event, list[str | None]]] = {}
 
 SUPPORTED_MEDIA_PREFIXES = ("image/", "video/")
 MAX_UPLOAD_FILES = 6
@@ -456,6 +467,7 @@ async def process_idea(
 @router.post("/process-idea/stream")
 async def process_idea_stream(
     request: Request,
+    user: dict = Depends(get_current_user),
     debug: bool = False,
     idea: str | None = Form(default=None),
     trip_id: str | None = Form(default=None),
@@ -584,6 +596,7 @@ async def process_idea_stream(
                     timeout_seconds=DB_TIMEOUT_SECONDS,
                     fn=create_trip,
                     name="Untitled Trip",
+                    user_id=user["sub"],
                 )
                 trip_id_value = trip["id"]
                 yield emit(
@@ -756,6 +769,7 @@ async def process_idea_stream(
 
 @router.post("/ideas/plan")
 async def ideas_plan(
+    user: dict = Depends(get_current_user),
     idea: str | None = Form(default=None),
     trip_location: str | None = Form(default=None),
     start_date: str | None = Form(default=None),
@@ -836,25 +850,95 @@ async def ideas_plan(
                 "stage_start",
                 {
                     "stage": "build_scaffold",
-                    "label": "Building draft plan",
-                    "detail": "Running evidence workers, web research, and scaffold generation.",
+                    "label": "Agent is researching your trip",
+                    "detail": "Nova is autonomously searching for activities, events, and weather.",
                 },
             )
             scaffold_started = time.perf_counter()
-            scaffold_result: ScaffoldResult = await _run_blocking_stage(
-                stage_name="orchestrate_scaffold",
-                timeout_seconds=ORCHESTRATION_TIMEOUT_SECONDS,
-                fn=orchestrate_scaffold,
-                idea_text=idea_text,
-                trip_location=body.trip_location,
-                start_date=body.start_date,
-                end_date=body.end_date,
-                timezone=body.timezone,
-                links=body.links,
-                media_inputs=media_inputs,
-                input_directives=body.input_directives,
-                initial_evidence=initial_evidence,
+
+            action_queue: _queue.Queue = _queue.Queue()
+            cancel_event = _threading.Event()
+            _active_plan_cancels[request_id] = cancel_event
+            question_event = _threading.Event()
+            question_answer: list[str | None] = [None]
+            _active_plan_questions[request_id] = (question_event, question_answer)
+            _loop = asyncio.get_event_loop()
+            scaffold_future = _loop.run_in_executor(
+                None,
+                lambda: orchestrate_scaffold(
+                    idea_text=idea_text,
+                    trip_location=body.trip_location,
+                    start_date=body.start_date,
+                    end_date=body.end_date,
+                    timezone=body.timezone,
+                    links=body.links,
+                    media_inputs=media_inputs,
+                    input_directives=body.input_directives,
+                    initial_evidence=initial_evidence,
+                    action_queue=action_queue,
+                    cancel_event=cancel_event,
+                    question_event=question_event,
+                    question_answer=question_answer,
+                ),
             )
+
+            # Drain agent actions in real-time while scaffold runs
+            while not scaffold_future.done():
+                drained = 0
+                while not action_queue.empty() and drained < 10:
+                    action = action_queue.get_nowait()
+                    if action.get("type") == "question":
+                        yield emit("agent_question", {
+                            "request_id": request_id,
+                            "question_id": action["question_id"],
+                            "question": action["question"],
+                            "options": action["options"],
+                        })
+                    else:
+                        yield emit("agent_action", {
+                            "tool_name": action["tool_name"],
+                            "summary": action["summary"],
+                            "tool_input": action.get("tool_input", {}),
+                            "result_preview": action.get("result_preview", ""),
+                            "elapsed_ms": action.get("elapsed_ms"),
+                            "iteration": action.get("iteration"),
+                            "reasoning": action.get("reasoning", ""),
+                            "scratchpad": action.get("scratchpad", ""),
+                        })
+                    drained += 1
+                await asyncio.sleep(0.15)
+
+            # Flush remaining actions
+            while not action_queue.empty():
+                action = action_queue.get_nowait()
+                if action.get("type") == "question":
+                    yield emit("agent_question", {
+                        "request_id": request_id,
+                        "question_id": action["question_id"],
+                        "question": action["question"],
+                        "options": action["options"],
+                    })
+                else:
+                    yield emit("agent_action", {
+                        "tool_name": action["tool_name"],
+                        "summary": action["summary"],
+                        "tool_input": action.get("tool_input", {}),
+                        "result_preview": action.get("result_preview", ""),
+                        "elapsed_ms": action.get("elapsed_ms"),
+                        "iteration": action.get("iteration"),
+                        "reasoning": action.get("reasoning", ""),
+                        "scratchpad": action.get("scratchpad", ""),
+                    })
+
+            scaffold_result: ScaffoldResult = await scaffold_future
+
+            # If agent was cancelled, emit a cancelled event and stop
+            if scaffold_result.debug_trace and scaffold_result.debug_trace.get("nova_agent_enabled") and \
+                    not scaffold_result.scaffold_text and cancel_event.is_set():
+                yield emit("agent_cancelled", {"message": "Planning was stopped."})
+                yield emit("done", {"elapsed_ms": (time.perf_counter() - total_started) * 1000.0})
+                return
+
             yield emit(
                 "stage_done",
                 {
@@ -879,6 +963,7 @@ async def ideas_plan(
                 revision_count=0,
             ))
 
+            debug_trace = scaffold_result.debug_trace or {}
             yield emit(
                 "scaffold_ready",
                 {
@@ -886,6 +971,14 @@ async def ideas_plan(
                     "scaffold_text": scaffold_result.scaffold_text,
                     "revision_count": 0,
                     "max_revisions": 1,
+                    "scratchpad": getattr(scaffold_result, "agent_scratchpad", ""),
+                    "agent_debug": {
+                        "iterations": debug_trace.get("iterations", 0),
+                        "total_input_tokens": debug_trace.get("total_input_tokens", 0),
+                        "total_output_tokens": debug_trace.get("total_output_tokens", 0),
+                        "nova_agent_enabled": debug_trace.get("nova_agent_enabled", False),
+                        "warning": debug_trace.get("warning"),
+                    },
                 },
             )
             yield emit("done", {"elapsed_ms": (time.perf_counter() - total_started) * 1000.0})
@@ -894,7 +987,11 @@ async def ideas_plan(
             yield emit("error", {"status_code": exc.status_code, "message": str(exc.detail)})
         except Exception as exc:  # noqa: BLE001
             logger.exception("ideas/plan SSE failed")
-            yield emit("error", {"status_code": 500, "message": str(exc)})
+            yield emit("error", {"status_code": 500, "message": "Planning failed. Please try again."})
+        finally:
+            # Always clean up global state even if an exception was raised
+            _active_plan_cancels.pop(request_id, None)
+            _active_plan_questions.pop(request_id, None)
 
     return StreamingResponse(
         stream(),
@@ -907,8 +1004,55 @@ async def ideas_plan(
     )
 
 
+class CancelPlanRequest(BaseModel):
+    request_id: str
+
+
+@router.post("/ideas/plan/cancel")
+async def ideas_plan_cancel(body: CancelPlanRequest, user: dict = Depends(get_current_user)):
+    """
+    Cancel an in-progress scaffold generation by request_id.
+    The request_id is emitted in the 'accepted' SSE event at the start of /ideas/plan.
+    Sets the cancel_event for the running agent loop; the loop exits at its next iteration.
+    """
+    event = _active_plan_cancels.get(body.request_id)
+    if event is None:
+        raise HTTPException(status_code=404, detail="No active plan found for this request_id.")
+    event.set()
+    logger.info("Plan cancel requested for request_id=%s", body.request_id)
+    return {"cancelled": True, "request_id": body.request_id}
+
+
+class AnswerQuestionRequest(BaseModel):
+    request_id: str
+    question_id: str
+    answer: str
+
+
+@router.post("/ideas/answer-question")
+async def ideas_answer_question(
+    body: AnswerQuestionRequest,
+    user: dict = Depends(get_current_user),
+):
+    """
+    Unblock a waiting ask_user tool call by providing the user's answer.
+    The request_id comes from the agent_question SSE event.
+    """
+    entry = _active_plan_questions.get(body.request_id)
+    if not entry:
+        raise HTTPException(status_code=404, detail="Question session not found or expired")
+    event, container = entry
+    container[0] = body.answer
+    event.set()
+    logger.info(
+        "Question answered for request_id=%s question_id=%s answer=%s",
+        body.request_id, body.question_id, body.answer[:100],
+    )
+    return {"ok": True}
+
+
 @router.post("/ideas/revise")
-async def ideas_revise(body: ReviseRequest):
+async def ideas_revise(body: ReviseRequest, user: dict = Depends(get_current_user)):
     """
     User-feedback scaffold revision endpoint (plain JSON, not SSE).
     Accepts user feedback, runs a fast LLM revision, updates and returns the session.
@@ -928,29 +1072,41 @@ async def ideas_revise(body: ReviseRequest):
         )
 
     snapshot = session.request_snapshot
-    revised_text, _debug = await asyncio.to_thread(
-        revise_scaffold_with_feedback,
-        original_scaffold=body.scaffold_text,
-        user_feedback=body.user_feedback,
-        idea_text=session.idea_text,
-        input_directives=None,
-        start_date=snapshot.get("start_date"),
-        end_date=snapshot.get("end_date"),
-    )
+    if _REVISION_BACKEND == "openrouter":
+        revised_text, _debug = await asyncio.to_thread(
+            revise_scaffold_with_feedback,
+            original_scaffold=body.scaffold_text,
+            user_feedback=body.user_feedback,
+            idea_text=session.idea_text,
+            input_directives=None,
+            start_date=snapshot.get("start_date"),
+            end_date=snapshot.get("end_date"),
+        )
+    else:
+        from services.nova_agent import revise_scaffold_with_nova
+        revised_text = await revise_scaffold_with_nova(
+            original_scaffold=body.scaffold_text,
+            user_feedback=body.user_feedback,
+            original_idea=session.idea_text,
+        )
 
     if not revised_text:
         # Fail open: return original scaffold unchanged
         revised_text = body.scaffold_text
 
-    session.scaffold_text = revised_text
-    session.revision_count += 1
-    put_session(session)
+    import dataclasses
+    updated_session = dataclasses.replace(
+        session,
+        scaffold_text=revised_text,
+        revision_count=session.revision_count + 1,
+    )
+    put_session(updated_session)
 
-    return {"scaffold_text": revised_text, "revision_count": session.revision_count}
+    return {"scaffold_text": revised_text, "revision_count": updated_session.revision_count}
 
 
 @router.post("/ideas/extract")
-async def ideas_extract(body: ExtractRequest):
+async def ideas_extract(body: ExtractRequest, user: dict = Depends(get_current_user)):
     """
     Final extraction endpoint (SSE).
     Takes approved scaffold + session_id, runs extraction, streams node batches.
@@ -1000,12 +1156,15 @@ async def ideas_extract(body: ExtractRequest):
                 timeout_seconds=DB_TIMEOUT_SECONDS,
                 fn=create_trip,
                 name="Untitled Trip",
+                user_id=user["sub"],
             )
             trip_id_value = trip["id"]
+            logger.info("Extract: created trip %s for session %s", trip_id_value, body.session_id)
             yield emit(
                 "stage_done",
                 {
                     "stage": "create_trip",
+                    "trip_id": trip_id_value,
                     "elapsed_ms": (time.perf_counter() - create_started) * 1000.0,
                 },
             )
@@ -1124,6 +1283,7 @@ async def ideas_extract(body: ExtractRequest):
                     "evidence": [item.model_dump(mode="json") for item in orchestration.evidence],
                     "debug_trace": orchestration.debug_trace or {},
                 }
+            logger.info("Extract: emitting final event trip_id=%s node_count=%d", trip_id_value, len(nodes))
             yield emit("final", final_payload)
             yield emit("done", {"elapsed_ms": (time.perf_counter() - total_started) * 1000.0})
 
@@ -1145,18 +1305,26 @@ async def ideas_extract(body: ExtractRequest):
 
 
 @router.patch("/trips/{trip_id}/nodes")
-async def bulk_update_nodes(trip_id: str, body: BulkUpdateNodesRequest):
+async def bulk_update_nodes(
+    trip_id: str,
+    body: BulkUpdateNodesRequest,
+    user: dict = Depends(get_current_user),
+):
     """Bulk-upsert edited itinerary nodes for a trip."""
     try:
         saved = await asyncio.to_thread(update_nodes, body.nodes, trip_id)
         return JSONResponse({"updated": len(saved), "nodes": saved})
     except Exception as exc:
         logger.exception("bulk_update_nodes failed for trip %s", trip_id)
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        raise HTTPException(status_code=500, detail="Failed to update nodes") from exc
 
 
 @router.post("/trips/{trip_id}/reoptimize-timings")
-async def reoptimize_timings(trip_id: str, body: ReoptimizeTimingsRequest):
+async def reoptimize_timings(
+    trip_id: str,
+    body: ReoptimizeTimingsRequest,
+    user: dict = Depends(get_current_user),
+):
     """Use a lightweight model to assign plausible times to activities."""
     import os, httpx, json as _json
 
@@ -1215,3 +1383,154 @@ async def reoptimize_timings(trip_id: str, body: ReoptimizeTimingsRequest):
         raise HTTPException(status_code=502, detail=f"Model returned invalid JSON: {content[:200]}") from exc
 
     return JSONResponse(result)
+
+
+# ── Authenticated trip read endpoints ─────────────────────────────────────────
+
+@router.get("/trips")
+async def list_trips(user: dict = Depends(get_current_user)):
+    """List all trips belonging to the authenticated user."""
+    from services.supabase_admin import get_admin_client
+    admin = get_admin_client()
+    result = (
+        admin.table("trips")
+        .select("*")
+        .eq("user_id", user["sub"])
+        .order("created_at", desc=True)
+        .execute()
+    )
+    return result.data
+
+
+@router.post("/trips/{trip_id}/chat", response_model=TripChatResponse)
+async def trip_chat(
+    trip_id: str,
+    body: TripChatRequest,
+    user: dict = Depends(get_current_user),
+):
+    """
+    Natural-language node editing via Nova 2 Lite.
+    The user can reference a specific node and ask for edits in plain language.
+    Nova returns the full updated nodes array plus a conversational reply.
+    """
+    # Verify trip ownership before processing (IDOR guard)
+    from services.supabase_admin import get_admin_client
+    admin = get_admin_client()
+    trip_result = (
+        admin.table("trips")
+        .select("id, user_id")
+        .eq("id", trip_id)
+        .maybe_single()
+        .execute()
+    )
+    if not trip_result.data or trip_result.data.get("user_id") != user["sub"]:
+        raise HTTPException(status_code=404, detail="Trip not found")
+
+    from config import bedrock_runtime
+
+    nodes_json = json.dumps(body.nodes, default=str)
+    selected_context = ""
+    if body.selected_node_id:
+        matched = next(
+            (n for n in body.nodes if n.get("id") == body.selected_node_id),
+            None,
+        )
+        if matched:
+            selected_context = f"\nThe user is specifically referencing this node:\n{json.dumps(matched, default=str)}\n"
+
+    system_prompt = (
+        "You are an itinerary editor for a travel planning app. "
+        "The user has an existing trip plan as a JSON array of activity nodes. "
+        "Each node has fields: id, title, activity_type, duration_mins, date_local, "
+        "start_time_local, end_time_local, description, segment_kind. "
+        "When the user requests a change, update the relevant node(s) and return "
+        "the COMPLETE updated nodes array as JSON, plus a brief conversational reply. "
+        "IMPORTANT: Respond with ONLY valid JSON in this exact format:\n"
+        '{"updated_nodes": [...], "reply": "..."}\n'
+        "Do not add markdown fences or any text outside the JSON."
+    )
+
+    user_message = (
+        f"Current trip nodes:\n{nodes_json}\n"
+        f"{selected_context}"
+        f"\nUser request: {body.message}"
+    )
+
+    def _call_bedrock() -> dict:
+        response = bedrock_runtime.converse(
+            modelId="us.amazon.nova-lite-v1:0",
+            system=[{"text": system_prompt}],
+            messages=[{"role": "user", "content": [{"text": user_message}]}],
+            inferenceConfig={"maxTokens": 4096, "temperature": 0.3},
+        )
+        raw_text = ""
+        for block in response.get("output", {}).get("message", {}).get("content", []):
+            if "text" in block:
+                raw_text = block["text"].strip()
+                break
+        # Strip markdown fences if present
+        if raw_text.startswith("```"):
+            raw_text = "\n".join(raw_text.split("\n")[1:]).rstrip()
+            if raw_text.endswith("```"):
+                raw_text = raw_text[:-3].strip()
+        try:
+            return json.loads(raw_text)
+        except json.JSONDecodeError as parse_exc:
+            logger.warning("[trip_chat] JSON parse failed: %s | raw=%s", parse_exc, raw_text[:300])
+            return {}
+
+    try:
+        loop = asyncio.get_running_loop()
+        result = await asyncio.wait_for(
+            loop.run_in_executor(None, _call_bedrock),
+            timeout=30.0,
+        )
+        updated_nodes = result.get("updated_nodes", body.nodes)
+        reply = result.get("reply", "Done! I've updated your itinerary.")
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[trip_chat] Nova call failed: %s", exc)
+        updated_nodes = body.nodes
+        reply = "Sorry, I couldn't process that change. Please try again."
+
+    return TripChatResponse(updated_nodes=updated_nodes, reply=reply)
+
+
+@router.get("/trips/{trip_id}")
+async def get_trip(trip_id: str, user: dict = Depends(get_current_user)):
+    """Get trip metadata (including trip_location) for a trip owned by the authenticated user."""
+    from services.supabase_admin import get_admin_client
+    admin = get_admin_client()
+    result = (
+        admin.table("trips")
+        .select("*")
+        .eq("id", trip_id)
+        .eq("user_id", user["sub"])
+        .maybe_single()
+        .execute()
+    )
+    if not result.data:
+        raise HTTPException(status_code=404, detail="Trip not found")
+    return result.data
+
+
+@router.get("/trips/{trip_id}/nodes")
+async def get_trip_nodes(trip_id: str, user: dict = Depends(get_current_user)):
+    """Get itinerary nodes for a trip owned by the authenticated user."""
+    from services.supabase_admin import get_admin_client
+    admin = get_admin_client()
+    trip_result = (
+        admin.table("trips")
+        .select("id, user_id")
+        .eq("id", trip_id)
+        .maybe_single()
+        .execute()
+    )
+    if not trip_result.data or trip_result.data.get("user_id") != user["sub"]:
+        raise HTTPException(status_code=404, detail="Trip not found")
+    nodes_result = (
+        admin.table("itinerary_nodes")
+        .select("*")
+        .eq("trip_id", trip_id)
+        .execute()
+    )
+    return nodes_result.data

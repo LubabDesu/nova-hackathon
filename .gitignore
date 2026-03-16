@@ -42,3 +42,19 @@ pnpm-debug.log*
 
 # Git worktrees
 .worktrees/
+
+# Claude Code sessions / plans (local only)
+.claude/sessions/
+.claude/projects/
+
+# Nova Act screenshots / recordings
+screenshots/
+recordings/
+*.png
+*.mp4
+*.webm
+
+# Test artifacts
+htmlcov/
+*.html
+junit*.xml

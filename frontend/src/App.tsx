@@ -1,4 +1,5 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import "./App.css";
 import { AuthProvider } from "./contexts/AuthContext";
 import ProtectedRoute from "./components/ProtectedRoute";
 import LoginPage from "./pages/LoginPage";
@@ -7,7 +8,7 @@ import PlanPage from "./pages/PlanPage";
 import TripPage from "./pages/TripPage";
 import JoinPage from "./pages/JoinPage";
 import GroupWaitingPage from "./pages/GroupWaitingPage";
-import AuthCallbackPage from "./pages/AuthCallbackPage";
+import GroupPlanPage from "./pages/GroupPlanPage";
 
 export default function App() {
   return (
@@ -15,7 +16,6 @@ export default function App() {
       <AuthProvider>
         <Routes>
           <Route path="/login" element={<LoginPage />} />
-          <Route path="/auth/callback" element={<AuthCallbackPage />} />
           <Route path="/join/:groupId" element={<JoinPage />} />
           <Route
             path="/dashboard"
@@ -46,6 +46,14 @@ export default function App() {
             element={
               <ProtectedRoute>
                 <GroupWaitingPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/group/:groupId/plan"
+            element={
+              <ProtectedRoute>
+                <GroupPlanPage />
               </ProtectedRoute>
             }
           />

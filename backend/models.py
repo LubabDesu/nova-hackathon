@@ -26,6 +26,7 @@ class InputDirectives(BaseModel):
     wake_time_pref: str | None = None                        # "early_bird" | "standard" | "late_riser"
     fitness_level: str | None = None                         # "low" | "moderate" | "high"
     accommodation_style: str | None = None                   # "budget" | "mid_range" | "boutique" | "luxury"
+    inspiration_links: list[str] = Field(default_factory=list)  # URLs + uploaded image URLs
 
 
 # ── Request ─────────────────────────────────────────────────────────────────
@@ -114,6 +115,7 @@ class ItineraryNode(BaseModel):
     description: str | None = None
     segment_origin: Literal["model", "synthetic"] | None = None
     segment_kind: Literal["activity", "transfer", "buffer", "rest"] | None = None
+    for_travelers: list[str] = Field(default_factory=list)
 
 
 # ── Response ────────────────────────────────────────────────────────────────
@@ -193,3 +195,64 @@ class ReoptimizeDay(BaseModel):
 class ReoptimizeTimingsRequest(BaseModel):
     days: list[ReoptimizeDay]
     wake_time: str = "09:00"
+
+
+# ── Group Trip Models ────────────────────────────────────────────────────────
+
+class CreateGroupTripRequest(BaseModel):
+    name: str
+    trip_location: str | None = None
+    start_date: date | None = None
+    end_date: date | None = None
+    trip_days: int | None = None
+    max_travelers: int = 10
+
+
+class CreateGroupTripResponse(BaseModel):
+    group_id: str
+    join_url: str
+
+
+class JoinGroupTripRequest(BaseModel):
+    nickname: str
+    free_text: str = ""
+    input_directives: InputDirectives = Field(default_factory=InputDirectives)
+
+
+class TravelerProfile(BaseModel):
+    nickname: str
+    extracted_directives: InputDirectives
+    raw_free_text: str = ""
+
+
+class ConflictItem(BaseModel):
+    field: str
+    values: list[str]
+    travelers: list[str]
+
+
+class ConsensusResult(BaseModel):
+    merged_directives: InputDirectives
+    conflicts: list[ConflictItem]
+    traveler_profiles: list[TravelerProfile]
+
+
+class GroupPlanStatusResponse(BaseModel):
+    group_id: str
+    destination: str | None
+    participants: list[dict]
+    slots_remaining: int = 0
+    max_travelers: int = 10
+
+
+# ── Trip Node Chat Models ─────────────────────────────────────────────────────
+
+class TripChatRequest(BaseModel):
+    message: str = Field(..., min_length=1, max_length=2000)
+    selected_node_id: str | None = None
+    nodes: list[dict] = Field(default_factory=list, max_length=200)
+
+
+class TripChatResponse(BaseModel):
+    updated_nodes: list[dict]
+    reply: str

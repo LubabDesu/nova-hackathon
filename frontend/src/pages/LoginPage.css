@@ -230,50 +230,11 @@
   max-width: 280px;
 }
 
-/* Google button */
-.lp-google-btn {
-  width: 100%;
+/* Google Sign-In button wrapper */
+.lp-google-wrap {
   display: flex;
-  align-items: center;
   justify-content: center;
-  gap: 0.7rem;
-  padding: 0.9rem 1.5rem;
-  background: #0d1e33;
-  color: #fff;
-  border: none;
-  border-radius: 13px;
-  font-family: 'DM Sans', sans-serif;
-  font-size: 0.92rem;
-  font-weight: 500;
-  cursor: pointer;
-  letter-spacing: 0.01em;
-  transition: background 0.16s ease, transform 0.14s ease, box-shadow 0.16s ease;
-  box-shadow: 0 3px 14px rgba(13, 30, 51, 0.28), 0 1px 3px rgba(13, 30, 51, 0.18);
-  position: relative;
-  overflow: hidden;
-}
-
-.lp-google-btn::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(180deg, rgba(255,255,255,0.06) 0%, transparent 100%);
-  border-radius: inherit;
-  pointer-events: none;
-}
-
-.lp-google-btn:hover:not(:disabled) {
-  background: #172e4a;
-  transform: translateY(-1.5px);
-  box-shadow: 0 6px 22px rgba(13, 30, 51, 0.36), 0 2px 6px rgba(13, 30, 51, 0.2);
-}
-.lp-google-btn:active:not(:disabled) {
-  transform: translateY(0);
-  box-shadow: 0 2px 8px rgba(13, 30, 51, 0.22);
-}
-.lp-google-btn:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
+  width: 100%;
 }
 
 /* Terms */

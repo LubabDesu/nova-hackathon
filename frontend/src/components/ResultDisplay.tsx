@@ -1176,6 +1176,13 @@ export default function ResultDisplay({
                                         {node.description && (
                                             <p className="node-desc">{node.description}</p>
                                         )}
+                                        {node.for_travelers && node.for_travelers.length > 0 && (
+                                            <div className="for-travelers-chips">
+                                                {node.for_travelers.map(name => (
+                                                    <span key={name} className="for-traveler-chip">{name}</span>
+                                                ))}
+                                            </div>
+                                        )}
                                         {node.lat != null && node.long != null && (
                                             <span className="coords">
                                                 📍 {node.lat.toFixed(4)}, {node.long.toFixed(4)}

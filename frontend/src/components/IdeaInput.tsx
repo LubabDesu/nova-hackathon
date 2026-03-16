@@ -1,6 +1,6 @@
-// NovaSync — Zone 1: Idea Input
+// NovaSync — Zone 1: Idea Input (Animated Edition)
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 interface IdeaInputProps {
     onSubmit: (idea: string) => void;
@@ -9,6 +9,17 @@ interface IdeaInputProps {
     loadingPhaseDetail?: string;
     loadingStepIndex?: number;
     loadingTotalSteps?: number;
+}
+
+// Animated dots for loading states
+function LoadingDots() {
+    return (
+        <span className="loading-dots">
+            <span />
+            <span />
+            <span />
+        </span>
+    );
 }
 
 export default function IdeaInput({
@@ -20,11 +31,20 @@ export default function IdeaInput({
     loadingTotalSteps,
 }: IdeaInputProps) {
     const [idea, setIdea] = useState("");
+    const [progressPercent, setProgressPercent] = useState(0);
 
     const handleSubmit = () => {
         if (idea.trim().length === 0) return;
         onSubmit(idea.trim());
     };
+
+    // Animate progress bar based on step index
+    useEffect(() => {
+        if (typeof loadingStepIndex === "number" && typeof loadingTotalSteps === "number" && loadingTotalSteps > 0) {
+            const targetPercent = ((loadingStepIndex + 1) / loadingTotalSteps) * 100;
+            setProgressPercent(targetPercent);
+        }
+    }, [loadingStepIndex, loadingTotalSteps]);
 
     return (
         <div className="idea-input-zone">
@@ -43,13 +63,13 @@ export default function IdeaInput({
                 disabled={loading}
             />
             <button
-                className="submit-btn"
+                className={`submit-btn ${loading ? "loading" : ""}`}
                 onClick={handleSubmit}
                 disabled={loading || idea.trim().length === 0}
             >
                 {loading ? (
                     <>
-                        <span className="spinner" /> Processing…
+                        <span className="spinner" /> Processing<LoadingDots />
                     </>
                 ) : (
                     "Extract Itinerary →"
@@ -57,20 +77,33 @@ export default function IdeaInput({
             </button>
             {loading && (
                 <div className="planning-progress-card">
-                    <p className="planning-progress-kicker">
-                        Planner status
-                        {typeof loadingStepIndex === "number" &&
-                        typeof loadingTotalSteps === "number"
-                            ? ` • Step ${loadingStepIndex + 1} of ${loadingTotalSteps}`
-                            : ""}
-                    </p>
+                    <div className="planning-progress-header">
+                        <p className="planning-progress-kicker">
+                            Planner status
+                            {typeof loadingStepIndex === "number" &&
+                            typeof loadingTotalSteps === "number"
+                                ? ` • Step ${loadingStepIndex + 1} of ${loadingTotalSteps}`
+                                : ""}
+                        </p>
+                        <div className="planning-progress-pulse" />
+                    </div>
                     <p className="planning-progress-title">
                         {loadingPhaseLabel ?? "Processing request"}
+                        <LoadingDots />
                     </p>
                     <p className="planning-progress-detail">
                         {loadingPhaseDetail ??
                             "Running trip-planning pipeline..."}
                     </p>
+                    {/* Progress bar */}
+                    {typeof loadingStepIndex === "number" && typeof loadingTotalSteps === "number" && (
+                        <div className="planning-progress-bar-container">
+                            <div 
+                                className="planning-progress-bar"
+                                style={{ width: `${progressPercent}%` }}
+                            />
+                        </div>
+                    )}
                 </div>
             )}
         </div>
