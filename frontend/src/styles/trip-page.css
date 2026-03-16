@@ -1,0 +1,724 @@
+/* ═══════════════════════════════════════════════════════════
+   trip-page.css  —  Split-panel trip view
+   Sky palette: navy #0b1f38, blue #4a8dc4, light #cfe5f8
+   Fonts: Cormorant Garamond (headings), DM Sans (body)
+   ═══════════════════════════════════════════════════════════ */
+
+/* ── Layout shell ── */
+.trip-page-shell {
+  position: relative;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* Top bar: back + title */
+.trip-topbar {
+  position: relative;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 48px 28px 12px;
+  flex-shrink: 0;
+}
+
+.trip-topbar-back {
+  background: none;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #4a6a8a;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.85rem;
+  padding: 4px 0;
+  transition: color 0.15s;
+}
+.trip-topbar-back:hover { color: #0b1f38; }
+
+.trip-topbar-title {
+  font-family: 'Cormorant Garamond', serif;
+  font-size: 1.6rem;
+  font-weight: 600;
+  color: #0b1f38;
+  margin: 0;
+  line-height: 1;
+}
+
+.trip-topbar-stats {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.trip-topbar-stat {
+  background: rgba(255, 255, 255, 0.6);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.85);
+  border-radius: 999px;
+  padding: 3px 12px;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.8rem;
+  color: #1e3a5f;
+  font-weight: 500;
+}
+
+/* ── Split layout ── */
+.trip-split-layout {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  gap: 0;
+  padding: 0 20px 20px;
+}
+
+/* ── Left sidebar ── */
+.trip-sidebar {
+  width: 35%;
+  min-width: 280px;
+  max-width: 420px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow-y: auto;
+  padding-right: 14px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(74, 141, 196, 0.2) transparent;
+}
+.trip-sidebar::-webkit-scrollbar { width: 4px; }
+.trip-sidebar::-webkit-scrollbar-thumb {
+  background: rgba(74, 141, 196, 0.25);
+  border-radius: 2px;
+}
+
+/* Sidebar section card */
+.sidebar-section {
+  background: rgba(255, 255, 255, 0.62);
+  backdrop-filter: blur(22px) saturate(1.5);
+  -webkit-backdrop-filter: blur(22px) saturate(1.5);
+  border: 1px solid rgba(255, 255, 255, 0.88);
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow:
+    0 2px 0 rgba(255, 255, 255, 0.85) inset,
+    0 4px 20px rgba(90, 145, 200, 0.10);
+  flex-shrink: 0;
+}
+
+.sidebar-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s;
+}
+.sidebar-section-header:hover {
+  background: rgba(74, 141, 196, 0.05);
+}
+
+.sidebar-section-title {
+  font-family: 'Cormorant Garamond', serif;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #0b1f38;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.sidebar-section-title-icon {
+  font-size: 0.8rem;
+  opacity: 0.8;
+}
+
+.sidebar-section-chevron {
+  font-size: 0.7rem;
+  color: #6b8fad;
+  transition: transform 0.2s;
+  flex-shrink: 0;
+}
+.sidebar-section-chevron.open { transform: rotate(90deg); }
+
+.sidebar-section-body {
+  padding: 0 16px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* ── Checklist items ── */
+.checklist-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.83rem;
+  color: #1e3a5f;
+  line-height: 1.4;
+  padding: 3px 0;
+}
+
+.checklist-icon {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  margin-top: 2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.65rem;
+  border: 1.5px solid rgba(74, 141, 196, 0.45);
+  color: transparent;
+}
+.checklist-icon.checked {
+  background: rgba(74, 141, 196, 0.2);
+  border-color: #4a8dc4;
+  color: #1e5a96;
+}
+
+.checklist-item.checked {
+  opacity: 0.52;
+  text-decoration: line-through;
+  text-decoration-color: rgba(74, 141, 196, 0.4);
+}
+
+.sidebar-placeholder {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.8rem;
+  color: #9fb3c8;
+  font-style: italic;
+  padding: 4px 0;
+}
+
+/* Consideration items */
+.consideration-item {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.82rem;
+  color: #2a4a6a;
+  line-height: 1.45;
+  padding: 4px 0 4px 10px;
+  border-left: 2px solid rgba(74, 141, 196, 0.25);
+}
+
+/* Agent feed inside sidebar — sky overrides */
+.trip-sidebar .agent-feed-card {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 0;
+  box-shadow: none;
+  margin: 0;
+}
+.trip-sidebar .agent-feed-title {
+  font-family: 'Cormorant Garamond', serif;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #0b1f38;
+}
+.trip-sidebar .agent-feed-list {
+  max-height: 260px;
+  scrollbar-color: rgba(74, 141, 196, 0.25) transparent;
+}
+.trip-sidebar .agent-feed-summary {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.79rem;
+  color: #1e3a5f;
+}
+.trip-sidebar .agent-feed-item {
+  border-bottom: 1px solid rgba(74, 141, 196, 0.07);
+  padding: 4px 0;
+}
+.trip-sidebar .agent-feed-badge--iter {
+  background: rgba(74, 141, 196, 0.12);
+  color: #1e5a96;
+}
+.trip-sidebar .agent-feed-badge--time {
+  background: rgba(30, 58, 95, 0.07);
+  color: #6b8fad;
+}
+.trip-sidebar .agent-feed-input-inline { color: #8ba5c0; }
+.trip-sidebar .agent-feed-detail-label { color: #8ba5c0; }
+.trip-sidebar .agent-feed-detail-pre {
+  background: rgba(210, 232, 248, 0.35);
+  border: 1px solid rgba(74, 141, 196, 0.14);
+  color: #2a4a6a;
+}
+.trip-sidebar .agent-feed-expand { color: #9fb3c8; }
+.trip-sidebar .agent-feed-expand:hover { color: #1e5a96; }
+.trip-sidebar .agent-feed-header {
+  padding: 0 0 8px;
+  border-bottom: 1px solid rgba(74, 141, 196, 0.1);
+  margin-bottom: 8px;
+}
+
+/* ── Right main panel ── */
+.trip-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.trip-main-scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 4px 0 18px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(74, 141, 196, 0.2) transparent;
+}
+.trip-main-scroll::-webkit-scrollbar { width: 4px; }
+.trip-main-scroll::-webkit-scrollbar-thumb {
+  background: rgba(74, 141, 196, 0.25);
+  border-radius: 2px;
+}
+
+/* ── Timeline day group ── */
+.timeline-day {
+  position: relative;
+  margin-bottom: 28px;
+}
+
+.trip-day-header {
+  font-family: 'Cormorant Garamond', serif;
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: #0b1f38;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  margin-bottom: 14px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(74, 141, 196, 0.12);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.trip-day-header-num {
+  background: rgba(74, 141, 196, 0.12);
+  color: #1e5a96;
+  border-radius: 6px;
+  padding: 2px 9px;
+  font-size: 0.8rem;
+  font-family: 'DM Sans', sans-serif;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+/* Vertical timeline line */
+.timeline-line-wrap {
+  position: relative;
+  padding-left: 36px;
+}
+
+.timeline-line-wrap::before {
+  content: '';
+  position: absolute;
+  left: 10px;
+  top: 6px;
+  bottom: 6px;
+  width: 2px;
+  background: linear-gradient(
+    to bottom,
+    rgba(74, 141, 196, 0.4) 0%,
+    rgba(74, 141, 196, 0.15) 100%
+  );
+  border-radius: 1px;
+}
+
+/* Timeline dot for each card */
+.timeline-dot {
+  position: absolute;
+  left: -30px;
+  top: 16px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #4a8dc4;
+  border: 2px solid rgba(255, 255, 255, 0.9);
+  box-shadow: 0 0 0 3px rgba(74, 141, 196, 0.18);
+  flex-shrink: 0;
+}
+
+.timeline-node-wrap {
+  position: relative;
+  margin-bottom: 10px;
+}
+
+/* ── Transfer / buffer connector ── */
+.timeline-transfer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0 4px 0;
+  padding: 5px 10px;
+  border-radius: 8px;
+  background: rgba(107, 143, 173, 0.06);
+  border: 1px dashed rgba(107, 143, 173, 0.22);
+}
+
+.timeline-transfer-arrow {
+  font-size: 0.8rem;
+  color: #8ba5c0;
+  flex-shrink: 0;
+}
+
+.timeline-transfer-label {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.8rem;
+  color: #6b8fad;
+  font-style: italic;
+}
+
+/* ── Activity card ── */
+.trip-activity-card {
+  position: relative;
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(18px) saturate(1.4);
+  -webkit-backdrop-filter: blur(18px) saturate(1.4);
+  border: 1px solid rgba(255, 255, 255, 0.88);
+  border-left-width: 3px;
+  border-radius: 12px;
+  padding: 10px 14px 11px;
+  cursor: pointer;
+  transition:
+    box-shadow 0.18s,
+    background 0.18s,
+    transform 0.12s;
+  box-shadow:
+    0 2px 0 rgba(255, 255, 255, 0.8) inset,
+    0 2px 12px rgba(90, 145, 200, 0.08);
+}
+
+.trip-activity-card:hover {
+  background: rgba(255, 255, 255, 0.82);
+  box-shadow:
+    0 2px 0 rgba(255, 255, 255, 0.85) inset,
+    0 6px 24px rgba(90, 145, 200, 0.14);
+  transform: translateY(-1px);
+}
+
+.trip-activity-card.selected {
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow:
+    0 0 0 2px rgba(74, 141, 196, 0.35),
+    0 2px 0 rgba(255, 255, 255, 0.85) inset,
+    0 8px 28px rgba(74, 141, 196, 0.18);
+  transform: translateY(-1px);
+}
+
+/* Time chip above card content */
+.time-chip {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.77rem;
+  font-weight: 500;
+  color: #6b8fad;
+  margin-bottom: 5px;
+  letter-spacing: 0.02em;
+}
+
+/* Card header row */
+.trip-card-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.trip-card-emoji {
+  font-size: 1.1rem;
+  line-height: 1;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.trip-card-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.trip-card-title {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.92rem;
+  font-weight: 500;
+  color: #0b1f38;
+  line-height: 1.3;
+  margin: 0 0 3px;
+}
+
+.trip-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 4px;
+}
+
+.trip-card-type {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.75rem;
+  color: #6b8fad;
+  text-transform: capitalize;
+  background: rgba(74, 141, 196, 0.08);
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+
+.duration-badge {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.75rem;
+  color: #8ba5c0;
+  background: rgba(107, 143, 173, 0.1);
+  border-radius: 999px;
+  padding: 1px 7px;
+}
+
+.trip-card-desc {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.8rem;
+  color: #4a6a8a;
+  line-height: 1.45;
+  margin-top: 4px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* Card actions row */
+.trip-card-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+  justify-content: flex-end;
+}
+
+.trip-book-btn {
+  background: #0d1e33;
+  color: #fff;
+  border: none;
+  border-radius: 999px;
+  padding: 4px 14px;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.75rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, transform 0.12s;
+  letter-spacing: 0.01em;
+}
+.trip-book-btn:hover {
+  background: #1a2f4a;
+  transform: translateY(-1px);
+}
+
+/* Empty state */
+.timeline-empty {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.88rem;
+  color: #9fb3c8;
+  text-align: center;
+  padding: 32px 0;
+  font-style: italic;
+}
+
+/* ── Chat bar ── */
+.trip-chat-bar {
+  flex-shrink: 0;
+  padding: 10px 18px 14px;
+  border-top: 1px solid rgba(74, 141, 196, 0.1);
+  background: rgba(255, 255, 255, 0.55);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.trip-chat-reference {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(74, 141, 196, 0.1);
+  border: 1px solid rgba(74, 141, 196, 0.22);
+  border-radius: 999px;
+  padding: 3px 10px 3px 12px;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.75rem;
+  color: #1e5a96;
+  align-self: flex-start;
+}
+
+.trip-chat-reference-dismiss {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #6b8fad;
+  font-size: 0.9rem;
+  line-height: 1;
+  padding: 0;
+  transition: color 0.12s;
+}
+.trip-chat-reference-dismiss:hover { color: #c0392b; }
+
+.trip-chat-form {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.trip-chat-input {
+  flex: 1;
+  background: rgba(255, 255, 255, 0.88);
+  border: 1px solid rgba(160, 210, 245, 0.5);
+  border-radius: 999px;
+  padding: 9px 18px;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.88rem;
+  color: #0b1f38;
+  outline: none;
+  transition: border-color 0.18s, box-shadow 0.18s;
+}
+.trip-chat-input::placeholder { color: #9fb3c8; }
+.trip-chat-input:focus {
+  border-color: #4a8dc4;
+  box-shadow: 0 0 0 3px rgba(74, 141, 196, 0.1);
+}
+.trip-chat-input:disabled { opacity: 0.55; cursor: not-allowed; }
+
+.trip-chat-submit {
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  background: #0d1e33;
+  color: #fff;
+  border: none;
+  border-radius: 50%;
+  font-size: 1rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s, transform 0.12s;
+}
+.trip-chat-submit:hover:not(:disabled) {
+  background: #1a2f4a;
+  transform: scale(1.06);
+}
+.trip-chat-submit:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* ── Loading / error states ── */
+.trip-loading-inner {
+  position: relative;
+  z-index: 10;
+  max-width: 820px;
+  margin: 0 auto;
+  padding: 120px 1.5rem 3rem;
+  text-align: center;
+}
+
+.trip-loading-spinner {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border: 2px solid #4a8dc4;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+.trip-error-inner {
+  position: relative;
+  z-index: 10;
+  max-width: 820px;
+  margin: 0 auto;
+  padding: 120px 1.5rem 3rem;
+}
+
+.trip-error-box {
+  background: rgba(192, 57, 43, 0.1);
+  border: 1px solid rgba(192, 57, 43, 0.3);
+  border-radius: 10px;
+  padding: 1rem 1.2rem;
+  color: #c0392b;
+  font-size: 0.88rem;
+  font-family: 'DM Sans', sans-serif;
+}
+
+.trip-chat-error {
+  font-size: 0.8rem;
+  color: #c0392b;
+  background: rgba(192, 57, 43, 0.07);
+  border: 1px solid rgba(192, 57, 43, 0.2);
+  border-radius: 6px;
+  padding: 6px 10px;
+  margin-bottom: 6px;
+  font-family: 'DM Sans', sans-serif;
+}
+
+/* ── Empty state ── */
+.trip-empty-state {
+  position: relative;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 2rem;
+  text-align: center;
+  gap: 16px;
+}
+
+.trip-empty-icon {
+  font-size: 2.2rem;
+  color: rgba(74, 141, 196, 0.5);
+  line-height: 1;
+}
+
+.trip-empty-heading {
+  font-family: 'Cormorant Garamond', serif;
+  font-size: 2rem;
+  font-weight: 600;
+  color: #0b1f38;
+  margin: 0;
+  line-height: 1.2;
+}
+
+.trip-empty-body {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.95rem;
+  color: #4a6a8a;
+  max-width: 380px;
+  line-height: 1.6;
+  margin: 0;
+}
+
+.trip-empty-back {
+  background: #0d1e33;
+  color: #fff;
+  border: none;
+  border-radius: 999px;
+  padding: 10px 24px;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.88rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, transform 0.12s;
+  letter-spacing: 0.01em;
+  margin-top: 8px;
+}
+
+.trip-empty-back:hover {
+  background: #1a2f4a;
+  transform: translateY(-1px);
+}

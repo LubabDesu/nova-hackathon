@@ -1,0 +1,2238 @@
+@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500&display=swap');
+
+/* ═══════════════════════════════════════════════════════════
+   sky-theme.css  —  Shared atmospheric design system
+   Used by: DashboardPage, GroupWaitingPage, JoinPage, etc.
+   ═══════════════════════════════════════════════════════════ */
+
+/* ── Sky background ── */
+.sky-bg {
+  position: fixed;
+  inset: 0;
+  background: linear-gradient(
+    175deg,
+    #a8ccec 0%,
+    #bdd9f4 18%,
+    #cfe5f8 36%,
+    #deeef9 52%,
+    #ecf5fb 68%,
+    #f4f8fc 82%,
+    #f9f7f3 100%
+  );
+  z-index: 0;
+}
+
+/* ── Decorative sphere arcs ── */
+.sky-arc {
+  position: fixed;
+  border-radius: 50%;
+  border: 1px solid rgba(255,255,255,0.45);
+  z-index: 1;
+  pointer-events: none;
+}
+.sky-arc-1 {
+  width: 900px;
+  height: 900px;
+  bottom: -420px;
+  left: -180px;
+  background: radial-gradient(circle at 60% 40%, rgba(255,255,255,0.12) 0%, transparent 70%);
+}
+.sky-arc-2 {
+  width: 700px;
+  height: 700px;
+  bottom: -380px;
+  right: -140px;
+  background: radial-gradient(circle at 40% 35%, rgba(255,255,255,0.08) 0%, transparent 70%);
+  border-color: rgba(255,255,255,0.3);
+}
+
+/* ── Animated clouds ── */
+.sky-cloud {
+  position: fixed;
+  background: white;
+  border-radius: 999px;
+  pointer-events: none;
+  z-index: 2;
+}
+.sky-cloud::before,
+.sky-cloud::after {
+  content: '';
+  position: absolute;
+  background: white;
+  border-radius: 50%;
+}
+
+.sky-cloud-1 {
+  width: 320px; height: 65px;
+  opacity: 0.55;
+  top: 16%;
+  left: -80px;
+  filter: blur(7px);
+  animation: sky-drift-r 42s linear infinite;
+}
+.sky-cloud-1::before { width: 110px; height: 90px; top: -45px; left: 50px; }
+.sky-cloud-1::after  { width: 80px;  height: 68px; top: -33px; left: 145px; }
+
+.sky-cloud-2 {
+  width: 420px; height: 75px;
+  opacity: 0.40;
+  top: 38%;
+  right: -120px;
+  filter: blur(11px);
+  animation: sky-drift-l 54s linear infinite 8s;
+}
+.sky-cloud-2::before { width: 140px; height: 100px; top: -50px; left: 70px; }
+.sky-cloud-2::after  { width: 100px; height: 78px;  top: -38px; left: 190px; }
+
+.sky-cloud-3 {
+  width: 240px; height: 52px;
+  opacity: 0.32;
+  top: 60%;
+  left: 8%;
+  filter: blur(14px);
+  animation: sky-drift-r 65s linear infinite 15s;
+}
+.sky-cloud-3::before { width: 90px; height: 72px; top: -36px; left: 35px; }
+
+.sky-cloud-4 {
+  width: 360px; height: 60px;
+  opacity: 0.48;
+  bottom: 18%;
+  right: 8%;
+  filter: blur(9px);
+  animation: sky-drift-l 38s linear infinite 3s;
+}
+.sky-cloud-4::before { width: 120px; height: 85px; top: -43px; left: 60px; }
+.sky-cloud-4::after  { width: 88px;  height: 65px; top: -30px; left: 168px; }
+
+.sky-cloud-5 {
+  width: 180px; height: 42px;
+  opacity: 0.28;
+  top: 8%;
+  right: 22%;
+  filter: blur(12px);
+  animation: sky-drift-l 72s linear infinite 20s;
+}
+.sky-cloud-5::before { width: 70px; height: 55px; top: -28px; left: 28px; }
+
+@keyframes sky-drift-r {
+  from { transform: translateX(-200px); }
+  to   { transform: translateX(calc(100vw + 300px)); }
+}
+@keyframes sky-drift-l {
+  from { transform: translateX(200px); }
+  to   { transform: translateX(calc(-100vw - 300px)); }
+}
+
+/* ── Top-left wordmark ── */
+.sky-wordmark {
+  position: fixed;
+  top: 1.6rem;
+  left: 2rem;
+  z-index: 20;
+  font-family: 'Cormorant Garamond', serif;
+  font-size: 1.2rem;
+  font-weight: 600;
+  color: #1e3a5f;
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  text-decoration: none;
+}
+
+.sky-wordmark-star {
+  font-size: 0.7rem;
+  color: #4a8dc4;
+  animation: sky-spin-slow 12s linear infinite;
+}
+@keyframes sky-spin-slow {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+/* ── Glassmorphism card ── */
+.glass-card {
+  background: rgba(255, 255, 255, 0.76);
+  backdrop-filter: blur(28px) saturate(1.6);
+  -webkit-backdrop-filter: blur(28px) saturate(1.6);
+  border: 1px solid rgba(255, 255, 255, 0.92);
+  border-radius: 26px;
+  padding: 2rem 2rem 1.8rem;
+  box-shadow:
+    0 2px 0 rgba(255,255,255,0.9) inset,
+    0 8px 32px rgba(90, 145, 200, 0.14),
+    0 2px 8px rgba(90, 145, 200, 0.08);
+}
+
+/* ── Inputs ── */
+.sky-input {
+  width: 100%;
+  background: rgba(255,255,255,0.9);
+  border: 1px solid rgba(160, 210, 245, 0.55);
+  border-radius: 10px;
+  padding: 10px 14px;
+  color: #0b1f38;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.95rem;
+  box-sizing: border-box;
+  display: block;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.sky-input:focus {
+  outline: none;
+  border-color: #4a8dc4;
+  box-shadow: 0 0 0 3px rgba(74, 141, 196, 0.12);
+}
+.sky-input::placeholder { color: #9fb3c8; }
+
+/* ── Buttons ── */
+.sky-btn-primary {
+  background: #0d1e33;
+  color: #fff;
+  border: none;
+  border-radius: 999px;
+  padding: 11px 28px;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.95rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: transform 0.15s, box-shadow 0.15s, background 0.15s;
+  letter-spacing: 0.01em;
+}
+.sky-btn-primary:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px rgba(13, 30, 51, 0.28);
+  background: #1a2f4a;
+}
+.sky-btn-primary:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.sky-btn-secondary {
+  background: transparent;
+  color: #2a6aa8;
+  border: 1px solid rgba(74, 141, 196, 0.55);
+  border-radius: 999px;
+  padding: 10px 24px;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.95rem;
+  font-weight: 400;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.sky-btn-secondary:hover {
+  border-color: #2a6aa8;
+  background: rgba(74, 141, 196, 0.06);
+}
+
+.sky-btn-danger {
+  background: transparent;
+  color: #c0392b;
+  border: 1px solid rgba(192, 57, 43, 0.4);
+  border-radius: 999px;
+  padding: 8px 20px;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.88rem;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.sky-btn-danger:hover {
+  border-color: #c0392b;
+  background: rgba(192, 57, 43, 0.06);
+}
+
+/* ═══════════════════════════════════════════════════════════
+   Agent Action Feed — sky-theme overrides
+   Scoped to .group-waiting-page so PlanPage dark theme is untouched
+   ═══════════════════════════════════════════════════════════ */
+
+.group-waiting-page .agent-feed-card {
+  background: rgba(255, 255, 255, 0.76);
+  backdrop-filter: blur(28px) saturate(1.6);
+  -webkit-backdrop-filter: blur(28px) saturate(1.6);
+  border: 1px solid rgba(255, 255, 255, 0.92);
+  border-radius: 20px;
+  padding: 14px 18px;
+  margin: 0;
+  max-height: none;
+  box-shadow:
+    0 2px 0 rgba(255, 255, 255, 0.9) inset,
+    0 8px 32px rgba(90, 145, 200, 0.14),
+    0 2px 8px rgba(90, 145, 200, 0.08);
+}
+
+.group-waiting-page .agent-feed-title {
+  font-family: 'Cormorant Garamond', serif;
+  font-size: 0.98rem;
+  font-weight: 600;
+  color: #0b1f38;
+  letter-spacing: 0.03em;
+}
+
+.group-waiting-page .agent-feed-pulse {
+  background: #4a8dc4;
+  box-shadow: 0 0 0 3px rgba(74, 141, 196, 0.18);
+}
+
+.group-waiting-page .agent-feed-list {
+  max-height: 220px;
+  scrollbar-color: rgba(74, 141, 196, 0.25) transparent;
+}
+
+.group-waiting-page .agent-feed-item {
+  padding: 5px 0;
+  border-bottom: 1px solid rgba(74, 141, 196, 0.07);
+}
+
+.group-waiting-page .agent-feed-item:last-child {
+  border-bottom: none;
+}
+
+.group-waiting-page .agent-feed-summary {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.82rem;
+  color: #1e3a5f;
+  line-height: 1.45;
+}
+
+.group-waiting-page .agent-feed-thinking {
+  color: #4a8dc4 !important;
+}
+
+/* Badges */
+.group-waiting-page .agent-feed-badge--iter {
+  background: rgba(74, 141, 196, 0.12);
+  color: #1e5a96;
+}
+
+.group-waiting-page .agent-feed-badge--time {
+  background: rgba(30, 58, 95, 0.07);
+  color: #6b8fad;
+}
+
+.group-waiting-page .agent-feed-badge--count {
+  background: rgba(30, 58, 95, 0.07);
+  color: #6b8fad;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.72rem;
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+
+/* Expand toggle */
+.group-waiting-page .agent-feed-expand {
+  color: #9fb3c8;
+}
+
+.group-waiting-page .agent-feed-expand:hover {
+  color: #1e5a96;
+}
+
+/* Inline input preview */
+.group-waiting-page .agent-feed-input-inline {
+  color: #8ba5c0;
+}
+
+/* Expanded detail blocks */
+.group-waiting-page .agent-feed-detail-label {
+  color: #8ba5c0;
+}
+
+.group-waiting-page .agent-feed-detail-pre {
+  background: rgba(210, 232, 248, 0.35);
+  border: 1px solid rgba(74, 141, 196, 0.14);
+  color: #2a4a6a;
+}
+
+/* Stop button — matches sky-btn-danger */
+.group-waiting-page .agent-feed-stop-btn {
+  background: transparent;
+  border: 1px solid rgba(192, 57, 43, 0.35);
+  border-radius: 999px;
+  color: #c0392b;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.78rem;
+  font-weight: 500;
+  padding: 4px 14px;
+  letter-spacing: 0.01em;
+}
+
+.group-waiting-page .agent-feed-stop-btn:hover {
+  background: rgba(192, 57, 43, 0.06);
+  border-color: #c0392b;
+}
+
+/* Preview (old class kept for compat) */
+.group-waiting-page .agent-feed-preview {
+  color: #8ba5c0;
+  font-style: normal;
+}
+
+/* ── Agent feed — group-plan-page sky overrides (mirrors group-waiting-page) ── */
+.group-plan-page .agent-feed-card {
+  background: rgba(255, 255, 255, 0.55);
+  backdrop-filter: blur(28px) saturate(1.5);
+  -webkit-backdrop-filter: blur(28px) saturate(1.5);
+  border: 1px solid rgba(255, 255, 255, 0.85);
+  border-radius: 16px;
+  padding: 12px 16px;
+  margin: 0;
+  max-height: none;
+  box-shadow:
+    0 2px 0 rgba(255, 255, 255, 0.8) inset,
+    0 6px 24px rgba(90, 145, 200, 0.12);
+}
+
+.group-plan-page .agent-feed-title {
+  font-family: 'Cormorant Garamond', serif;
+  font-size: 0.98rem;
+  font-weight: 600;
+  color: #0b1f38;
+  letter-spacing: 0.03em;
+}
+
+.group-plan-page .agent-feed-pulse {
+  background: #4a8dc4;
+  box-shadow: 0 0 0 3px rgba(74, 141, 196, 0.18);
+}
+
+.group-plan-page .agent-feed-list {
+  max-height: 320px;
+  scrollbar-color: rgba(74, 141, 196, 0.25) transparent;
+}
+
+.group-plan-page .agent-feed-item {
+  padding: 5px 0;
+  border-bottom: 1px solid rgba(74, 141, 196, 0.07);
+}
+
+.group-plan-page .agent-feed-item:last-child {
+  border-bottom: none;
+}
+
+.group-plan-page .agent-feed-summary {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.82rem;
+  color: #1e3a5f;
+  line-height: 1.45;
+}
+
+.group-plan-page .agent-feed-thinking {
+  color: #4a8dc4 !important;
+}
+
+.group-plan-page .agent-feed-badge--iter {
+  background: rgba(74, 141, 196, 0.12);
+  color: #1e5a96;
+}
+
+.group-plan-page .agent-feed-badge--time {
+  background: rgba(30, 58, 95, 0.07);
+  color: #6b8fad;
+}
+
+.group-plan-page .agent-feed-badge--count {
+  background: rgba(30, 58, 95, 0.07);
+  color: #6b8fad;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.72rem;
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+
+.group-plan-page .agent-feed-expand {
+  color: #9fb3c8;
+}
+
+.group-plan-page .agent-feed-expand:hover {
+  color: #1e5a96;
+}
+
+.group-plan-page .agent-feed-input-inline {
+  color: #8ba5c0;
+}
+
+.group-plan-page .agent-feed-detail-label {
+  color: #8ba5c0;
+}
+
+.group-plan-page .agent-feed-detail-pre {
+  background: rgba(210, 232, 248, 0.35);
+  border: 1px solid rgba(74, 141, 196, 0.14);
+  color: #2a4a6a;
+}
+
+.group-plan-page .agent-feed-stop-btn {
+  background: transparent;
+  border: 1px solid rgba(192, 57, 43, 0.35);
+  border-radius: 999px;
+  color: #c0392b;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.78rem;
+  font-weight: 500;
+  padding: 4px 14px;
+  letter-spacing: 0.01em;
+}
+
+.group-plan-page .agent-feed-stop-btn:hover {
+  background: rgba(192, 57, 43, 0.06);
+  border-color: #c0392b;
+}
+
+.group-plan-page .agent-feed-preview {
+  color: #8ba5c0;
+  font-style: normal;
+}
+
+/* Reasoning + scratchpad note — sky-theme (dark text on light bg) */
+.group-plan-page .agent-feed-reasoning {
+  color: #8ba5c0;
+  font-size: 0.72rem;
+}
+
+.group-plan-page .agent-feed-scratchpad-note {
+  color: #7a4f0d;
+  background: rgba(202, 138, 4, 0.13);
+  border: 1px solid rgba(202, 138, 4, 0.28);
+  border-radius: 6px;
+  padding: 4px 10px;
+  margin-top: 4px;
+  line-height: 1.45;
+  font-size: 0.79rem;
+}
+
+/* ── Group plan page — trip result grid ── */
+.trip-result-header {
+    background: rgba(255, 255, 255, 0.18);
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.35);
+    border-radius: 18px;
+    padding: 1.8rem 2rem;
+    margin-bottom: 2rem;
+}
+
+.trip-result-header h1 {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 2rem;
+    font-weight: 600;
+    color: #0b1f38;
+    margin: 0 0 0.5rem;
+}
+
+.trip-result-stats {
+    display: flex;
+    gap: 1.2rem;
+    flex-wrap: wrap;
+    margin-top: 0.6rem;
+}
+
+.trip-result-stat {
+    font-size: 0.82rem;
+    color: #4a6a8a;
+    background: rgba(74, 141, 196, 0.1);
+    border: 1px solid rgba(74, 141, 196, 0.2);
+    border-radius: 999px;
+    padding: 2px 12px;
+}
+
+.trip-result-days {
+    display: flex;
+    flex-direction: column;
+    gap: 2rem;
+}
+
+.trip-result-day {
+    background: rgba(255, 255, 255, 0.18);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    border-radius: 16px;
+    overflow: hidden;
+}
+
+.trip-result-day-header {
+    background: rgba(255, 255, 255, 0.25);
+    padding: 0.8rem 1.4rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+    font-family: 'DM Sans', sans-serif;
+    font-weight: 600;
+    font-size: 0.9rem;
+    color: #0b1f38;
+}
+
+.trip-result-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1rem;
+    padding: 1.2rem;
+}
+
+@media (max-width: 640px) {
+    .trip-result-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+.activity-card {
+    background: rgba(255, 255, 255, 0.55);
+    backdrop-filter: blur(8px);
+    border-radius: 10px;
+    border-left: 3px solid #4a8dc4;
+    padding: 0.85rem 1rem;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.activity-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(74, 141, 196, 0.15);
+}
+
+.activity-card-icon {
+    font-size: 1.1rem;
+    margin-bottom: 0.3rem;
+    display: block;
+}
+
+.activity-card-title {
+    font-weight: 600;
+    font-size: 0.88rem;
+    color: #0b1f38;
+    margin-bottom: 0.2rem;
+    line-height: 1.3;
+}
+
+.activity-card-type {
+    font-size: 0.72rem;
+    color: #6b82a0;
+    text-transform: capitalize;
+    margin-bottom: 0.3rem;
+}
+
+.activity-card-time {
+    font-size: 0.72rem;
+    color: #4a8dc4;
+    font-variant-numeric: tabular-nums;
+}
+
+.activity-card-desc {
+    font-size: 0.77rem;
+    color: #4a6a8a;
+    line-height: 1.4;
+    margin-top: 0.3rem;
+}
+
+
+/* ═══════════════════════════════════════════════════════════
+   Booking Panel — sky-theme styles
+   ═══════════════════════════════════════════════════════════ */
+
+.booking-panel {
+    max-width: 600px;
+    margin: 0 auto;
+}
+
+.booking-panel-header {
+    margin-bottom: 1.25rem;
+}
+
+.booking-panel-title-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    margin-bottom: 0.35rem;
+}
+
+.booking-panel-title {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: #0b1f38;
+    margin: 0;
+}
+
+.booking-panel-subtitle {
+    font-family: 'DM Sans', sans-serif;
+    font-size: 0.85rem;
+    color: #6b8fad;
+    margin: 0;
+}
+
+/* Restaurant Info */
+.booking-restaurant-info {
+    background: rgba(255, 255, 255, 0.55);
+    border: 1px solid rgba(74, 141, 196, 0.15);
+    border-radius: 12px;
+    padding: 1rem 1.25rem;
+    margin-bottom: 1.25rem;
+}
+
+.booking-info-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    padding: 0.4rem 0;
+    border-bottom: 1px solid rgba(74, 141, 196, 0.08);
+}
+
+.booking-info-row:last-of-type {
+    border-bottom: none;
+}
+
+.booking-info-label {
+    font-family: 'DM Sans', sans-serif;
+    font-size: 0.8rem;
+    color: #6b8fad;
+    font-weight: 500;
+}
+
+.booking-info-value {
+    font-family: 'DM Sans', sans-serif;
+    font-size: 0.9rem;
+    color: #0b1f38;
+    font-weight: 500;
+}
+
+.booking-url-link {
+    display: inline-block;
+    margin-top: 0.5rem;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 0.8rem;
+    color: #2a6aa8;
+    text-decoration: none;
+    transition: color 0.15s;
+}
+
+.booking-url-link:hover {
+    color: #1e5a96;
+    text-decoration: underline;
+}
+
+/* Phone Input Section */
+.booking-phone-section {
+    margin-bottom: 1.25rem;
+}
+
+.booking-phone-label {
+    display: block;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 0.85rem;
+    font-weight: 500;
+    color: #0b1f38;
+    margin-bottom: 0.5rem;
+}
+
+.booking-required {
+    color: #c0392b;
+    margin-left: 0.15rem;
+}
+
+.booking-phone-hint {
+    font-size: 0.75rem;
+    color: #6b8fad;
+    font-weight: 400;
+    margin-left: 0.5rem;
+}
+
+.booking-error-text {
+    display: block;
+    margin-top: 0.4rem;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 0.78rem;
+    color: #c0392b;
+}
+
+/* Actions */
+.booking-actions {
+    margin-bottom: 1.25rem;
+}
+
+.booking-error-banner {
+    background: rgba(192, 57, 43, 0.08);
+    border: 1px solid rgba(192, 57, 43, 0.25);
+    border-radius: 10px;
+    padding: 0.75rem 1rem;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 0.85rem;
+    color: #c0392b;
+    margin-bottom: 1.25rem;
+}
+
+/* Screenshot Section */
+.booking-screenshot-section {
+    margin-bottom: 1.25rem;
+}
+
+.booking-section-header {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    margin-bottom: 0.6rem;
+}
+
+.booking-section-title {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: #0b1f38;
+}
+
+.booking-screenshot-expand-btn {
+    margin-left: auto;
+    background: none;
+    border: 1px solid rgba(74, 141, 196, 0.3);
+    border-radius: 6px;
+    padding: 0.2rem 0.55rem;
+    font-size: 0.78rem;
+    color: #4a8dc4;
+    cursor: pointer;
+    line-height: 1.4;
+    transition: background 0.15s, border-color 0.15s;
+    flex-shrink: 0;
+}
+
+.booking-screenshot-expand-btn:hover {
+    background: rgba(74, 141, 196, 0.1);
+    border-color: rgba(74, 141, 196, 0.6);
+}
+
+.booking-screenshot-container {
+    background: rgba(11, 31, 56, 0.04);
+    border: 1px solid rgba(74, 141, 196, 0.15);
+    border-radius: 12px;
+    overflow: hidden;
+    min-height: 200px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.booking-screenshot {
+    width: 100%;
+    max-height: 420px;
+    object-fit: contain;
+    display: block;
+    cursor: zoom-in;
+}
+
+.booking-screenshot-placeholder {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 2rem;
+    color: #6b8fad;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 0.85rem;
+}
+
+.booking-screenshot-spinner {
+    font-size: 1.5rem;
+    animation: spin 1.5s linear infinite;
+}
+
+
+/* Logs Section */
+.booking-logs-section {
+    margin-bottom: 1.25rem;
+}
+
+.booking-logs-list {
+    background: rgba(255, 255, 255, 0.55);
+    border: 1px solid rgba(74, 141, 196, 0.15);
+    border-radius: 12px;
+    padding: 0.75rem 1rem;
+    max-height: 240px;
+    overflow-y: auto;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 0.82rem;
+    scrollbar-color: rgba(74, 141, 196, 0.25) transparent;
+}
+
+.booking-log-item {
+    display: flex;
+    gap: 0.75rem;
+    padding: 0.35rem 0;
+    border-bottom: 1px solid rgba(74, 141, 196, 0.06);
+}
+
+.booking-log-item:last-child {
+    border-bottom: none;
+}
+
+.booking-log-time {
+    color: #8ba5c0;
+    font-variant-numeric: tabular-nums;
+    font-size: 0.75rem;
+    flex-shrink: 0;
+    min-width: 65px;
+}
+
+.booking-log-message {
+    color: #1e3a5f;
+    line-height: 1.4;
+}
+
+.booking-log-item--success .booking-log-message {
+    color: #16a34a;
+}
+
+.booking-log-item--error .booking-log-message {
+    color: #c0392b;
+}
+
+.booking-log-item--action .booking-log-message {
+    color: #2a6aa8;
+    font-weight: 500;
+}
+
+.booking-log-thinking {
+    color: #4a8dc4 !important;
+    font-style: italic;
+}
+
+/* Result Section */
+.booking-result {
+    border-radius: 12px;
+    padding: 1rem 1.25rem;
+}
+
+.booking-result--success {
+    background: rgba(22, 163, 74, 0.08);
+    border: 1px solid rgba(22, 163, 74, 0.25);
+}
+
+.booking-result--error {
+    background: rgba(192, 57, 43, 0.08);
+    border: 1px solid rgba(192, 57, 43, 0.25);
+}
+
+.booking-result-header {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    margin-bottom: 0.75rem;
+}
+
+.booking-result-icon {
+    font-size: 1.25rem;
+}
+
+.booking-result-title {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: #0b1f38;
+}
+
+.booking-result-details {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.booking-result-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    padding: 0.3rem 0;
+    border-bottom: 1px solid rgba(22, 163, 74, 0.1);
+}
+
+.booking-result-row:last-child {
+    border-bottom: none;
+}
+
+.booking-result-label {
+    font-family: 'DM Sans', sans-serif;
+    font-size: 0.8rem;
+    color: #6b8fad;
+}
+
+.booking-result-value {
+    font-family: 'DM Sans', sans-serif;
+    font-size: 0.9rem;
+    color: #0b1f38;
+    font-weight: 500;
+}
+
+.booking-result-notes {
+    margin-top: 0.5rem;
+    padding-top: 0.5rem;
+    border-top: 1px solid rgba(22, 163, 74, 0.1);
+}
+
+.booking-result-notes p {
+    margin: 0.25rem 0 0;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 0.85rem;
+    color: #1e3a5f;
+    line-height: 1.5;
+}
+
+.booking-result-error p {
+    margin: 0;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 0.85rem;
+    color: #c0392b;
+    line-height: 1.5;
+}
+
+/* Status Badge */
+.booking-status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.3rem 0.75rem;
+    border-radius: 999px;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 0.78rem;
+    font-weight: 500;
+}
+
+.booking-badge--pending {
+    background: rgba(251, 191, 36, 0.15);
+    color: #92400e;
+    border: 1px solid rgba(251, 191, 36, 0.3);
+}
+
+.booking-badge--confirmed {
+    background: rgba(22, 163, 74, 0.12);
+    color: #065f46;
+    border: 1px solid rgba(22, 163, 74, 0.25);
+}
+
+.booking-badge--failed {
+    background: rgba(192, 57, 43, 0.1);
+    color: #991b1b;
+    border: 1px solid rgba(192, 57, 43, 0.2);
+}
+
+.booking-badge-icon {
+    font-size: 0.85rem;
+}
+
+.booking-badge-label {
+    letter-spacing: 0.01em;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   Scaffold Review Card — sky-theme overrides
+   ═══════════════════════════════════════════════════════════ */
+
+.group-plan-page .scaffold-review-card {
+    background: rgba(255, 255, 255, 0.76);
+    backdrop-filter: blur(28px) saturate(1.6);
+    -webkit-backdrop-filter: blur(28px) saturate(1.6);
+    border: 1px solid rgba(255, 255, 255, 0.92);
+    border-radius: 20px;
+    padding: 1.5rem;
+    box-shadow:
+        0 2px 0 rgba(255,255,255,0.9) inset,
+        0 8px 32px rgba(90, 145, 200, 0.14),
+        0 2px 8px rgba(90, 145, 200, 0.08);
+}
+
+.group-plan-page .scaffold-review-header {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    margin-bottom: 1rem;
+    padding-bottom: 0.75rem;
+    border-bottom: 1px solid rgba(74, 141, 196, 0.15);
+}
+
+.group-plan-page .scaffold-review-icon {
+    color: #4a8dc4;
+    font-size: 1.1rem;
+}
+
+.group-plan-page .scaffold-review-title {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: #0b1f38;
+    letter-spacing: 0.02em;
+}
+
+.group-plan-page .scaffold-review-body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    margin-bottom: 1.25rem;
+}
+
+.group-plan-page .scaffold-spacer {
+    height: 0.5rem;
+}
+
+/* Day block styling */
+.group-plan-page .scaffold-day-block {
+    background: rgba(255, 255, 255, 0.6);
+    border: 1px solid rgba(74, 141, 196, 0.2);
+    border-radius: 12px;
+    padding: 1rem 1.25rem;
+    margin-bottom: 0.75rem;
+    box-shadow: 0 2px 4px rgba(74, 141, 196, 0.05);
+}
+
+.group-plan-page .scaffold-day-block:last-of-type {
+    margin-bottom: 0;
+}
+
+.group-plan-page .scaffold-day-header {
+    font-family: 'Cormorant Garamond', serif;
+    font-weight: 700;
+    font-size: 0.95rem;
+    color: #0b1f38;
+    margin-bottom: 0.6rem;
+    padding-bottom: 0.4rem;
+    border-bottom: 1px solid rgba(74, 141, 196, 0.1);
+}
+
+.group-plan-page .scaffold-activity-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+}
+
+.group-plan-page .scaffold-activity-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
+    font-size: 0.85rem;
+    color: #1e3a5f;
+    line-height: 1.4;
+}
+
+.group-plan-page .scaffold-activity-dot {
+    color: #4a8dc4;
+    font-size: 0.7rem;
+    margin-top: 0.15rem;
+    flex-shrink: 0;
+}
+
+.group-plan-page .scaffold-activity-text {
+    flex: 1;
+}
+
+.group-plan-page .scaffold-section-header {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: #4a6a8a;
+    margin: 0.75rem 0 0.35rem;
+    padding: 0.5rem 0;
+    border-bottom: 1px solid rgba(74, 141, 196, 0.1);
+}
+
+.group-plan-page .scaffold-body-line {
+    font-size: 0.85rem;
+    color: #1e3a5f;
+    line-height: 1.5;
+    padding: 0.15rem 0;
+}
+
+/* Agent notes section */
+.group-plan-page .scaffold-agent-notes {
+    margin: 1rem 0;
+    border-top: 1px solid rgba(74, 141, 196, 0.15);
+}
+
+.group-plan-page .scaffold-notes-toggle {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: #4a6a8a;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 0.85rem;
+    font-weight: 500;
+    padding: 0.75rem 0;
+    letter-spacing: 0.01em;
+    transition: color 0.2s;
+    width: 100%;
+    text-align: left;
+}
+
+.group-plan-page .scaffold-notes-toggle:hover {
+    color: #0b1f38;
+}
+
+.group-plan-page .scaffold-notes-icon {
+    font-size: 0.9rem;
+}
+
+.group-plan-page .scaffold-notes-label {
+    flex: 1;
+}
+
+.group-plan-page .scaffold-notes-chevron {
+    color: #9fb3c8;
+    font-size: 0.8rem;
+}
+
+.group-plan-page .scaffold-notes-content {
+    background: rgba(255, 255, 255, 0.6);
+    border: 1px solid rgba(74, 141, 196, 0.15);
+    border-radius: 10px;
+    padding: 0.75rem 1rem;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 0.8rem;
+    line-height: 1.6;
+    max-height: 320px;
+    overflow-y: auto;
+}
+
+.group-plan-page .scaffold-note-line {
+    padding: 0.15rem 0;
+    color: #1e3a5f;
+}
+
+.group-plan-page .scaffold-note-checked {
+    color: #16a34a;
+    font-weight: 500;
+}
+
+.group-plan-page .scaffold-note-unchecked {
+    color: #92600a;
+    font-weight: 500;
+}
+
+.group-plan-page .scaffold-note-highlight {
+    color: #4a6a8a;
+    font-weight: 500;
+    background: rgba(74, 141, 196, 0.08);
+    border-radius: 4px;
+    padding: 0.2rem 0.4rem;
+    margin: 0.1rem -0.4rem;
+}
+
+.group-plan-page .scaffold-note-result {
+    color: #0b1f38;
+    font-weight: 600;
+    background: rgba(74, 141, 196, 0.12);
+    border-radius: 4px;
+    padding: 0.2rem 0.4rem;
+    margin: 0.1rem -0.4rem;
+}
+
+.group-plan-page .scaffold-note-empty {
+    height: 0.5rem;
+}
+
+/* Footer and actions */
+.group-plan-page .scaffold-review-footer {
+    display: flex;
+    flex-direction: column;
+    gap: 0.85rem;
+    margin-top: 1rem;
+    padding-top: 1rem;
+    border-top: 1px solid rgba(74, 141, 196, 0.15);
+}
+
+.group-plan-page .scaffold-feedback-input {
+    width: 100%;
+    box-sizing: border-box;
+    background: rgba(255, 255, 255, 0.9);
+    border: 1px solid rgba(160, 210, 245, 0.55);
+    border-radius: 10px;
+    color: #0b1f38;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 0.9rem;
+    padding: 0.75rem 1rem;
+    resize: vertical;
+    outline: none;
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.group-plan-page .scaffold-feedback-input:focus {
+    border-color: #4a8dc4;
+    box-shadow: 0 0 0 3px rgba(74, 141, 196, 0.12);
+}
+
+.group-plan-page .scaffold-feedback-input::placeholder {
+    color: #9fb3c8;
+}
+
+.group-plan-page .scaffold-review-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+}
+
+.group-plan-page .scaffold-revision-counter {
+    font-size: 0.78rem;
+    color: #6b8fad;
+    white-space: nowrap;
+}
+
+.group-plan-page .scaffold-review-buttons {
+    display: flex;
+    gap: 0.6rem;
+}
+
+.group-plan-page .scaffold-btn {
+    padding: 0.6rem 1.1rem;
+    border-radius: 999px;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    border: 1px solid transparent;
+    transition: all 0.15s ease;
+    white-space: nowrap;
+}
+
+.group-plan-page .scaffold-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+.group-plan-page .scaffold-btn-revise {
+    background: transparent;
+    border-color: rgba(74, 141, 196, 0.4);
+    color: #4a6a8a;
+}
+
+.group-plan-page .scaffold-btn-revise:not(:disabled):hover {
+    border-color: #4a8dc4;
+    color: #4a8dc4;
+    background: rgba(74, 141, 196, 0.06);
+}
+
+.group-plan-page .scaffold-btn-approve {
+    background: #0ea5e9;
+    color: #fff;
+    box-shadow: 0 2px 8px rgba(14, 165, 233, 0.25);
+}
+
+.group-plan-page .scaffold-btn-approve:not(:disabled):hover {
+    background: #0284c7;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(14, 165, 233, 0.35);
+}
+
+/* ═══════════════════════════════════════════════════════════
+   Agent Action Feed — sky-theme text wrapping fixes
+   ═══════════════════════════════════════════════════════════ */
+
+.group-plan-page .agent-feed-input-inline {
+    white-space: normal;
+    word-break: break-word;
+    color: #6b8fad;
+}
+
+.group-plan-page .agent-feed-summary {
+    word-break: break-word;
+    line-height: 1.5;
+}
+
+.group-plan-page .agent-feed-row {
+    flex-wrap: wrap;
+    gap: 0.35rem 0.5rem;
+}
+
+.group-plan-page .agent-feed-content {
+    min-width: 0;
+    flex: 1;
+}
+
+.group-plan-page .agent-feed-reasoning {
+    color: #6b8fad;
+    font-size: 0.75rem;
+    font-style: italic;
+    margin-top: 0.25rem;
+    line-height: 1.4;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   Research Progress Tracker — sky-theme styles
+   ═══════════════════════════════════════════════════════════ */
+
+.research-progress {
+    background: rgba(255, 255, 255, 0.5);
+    border: 1px solid rgba(74, 141, 196, 0.15);
+    border-radius: 10px;
+    padding: 0.85rem 1rem;
+    margin-bottom: 0.75rem;
+}
+
+.research-progress-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.5rem;
+}
+
+.research-progress-icon {
+    font-size: 0.9rem;
+}
+
+.research-progress-title {
+    font-family: 'DM Sans', sans-serif;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: #4a6a8a;
+}
+
+.research-progress-summary {
+    font-family: 'DM Sans', sans-serif;
+    font-size: 0.75rem;
+    color: #6b8fad;
+    margin-left: auto;
+}
+
+/* Progress bar */
+.research-progress-bar-container {
+    height: 4px;
+    background: rgba(74, 141, 196, 0.15);
+    border-radius: 2px;
+    overflow: hidden;
+    margin-bottom: 0.6rem;
+}
+
+.research-progress-bar {
+    height: 100%;
+    background: linear-gradient(90deg, #4a8dc4, #6ee7b7);
+    border-radius: 2px;
+    transition: width 0.3s ease;
+}
+
+/* Task list */
+.research-task-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.research-task {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 0.78rem;
+    padding: 0.15rem 0;
+    line-height: 1.4;
+    transition: color 0.2s ease;
+}
+
+.research-task-checkbox {
+    flex-shrink: 0;
+    font-size: 0.85rem;
+    margin-top: -0.05rem;
+}
+
+.research-task.checked {
+    color: #16a34a;
+}
+
+.research-task.checked .research-task-text {
+    text-decoration: line-through;
+    opacity: 0.7;
+}
+
+.research-task.unchecked {
+    color: #1e3a5f;
+}
+
+.research-task-text {
+    flex: 1;
+}
+
+/* Status indicator */
+.research-progress-status {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 0.6rem;
+    padding-top: 0.6rem;
+    border-top: 1px solid rgba(74, 141, 196, 0.1);
+    font-family: 'DM Sans', sans-serif;
+    font-size: 0.75rem;
+    color: #4a8dc4;
+    font-style: italic;
+}
+
+.research-progress-pulse {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #4a8dc4;
+    animation: research-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes research-pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.4; transform: scale(0.75); }
+}
+
+/* ═══════════════════════════════════════════════════════════
+   Agent Action Feed — Collapsible styles
+   ═══════════════════════════════════════════════════════════ */
+
+.group-plan-page .agent-feed-card {
+    background: rgba(255, 255, 255, 0.55);
+    backdrop-filter: blur(28px) saturate(1.5);
+    -webkit-backdrop-filter: blur(28px) saturate(1.5);
+    border: 1px solid rgba(255, 255, 255, 0.85);
+    border-radius: 16px;
+    padding: 12px 16px;
+    margin: 0 0 20px;
+    box-shadow:
+        0 2px 0 rgba(255, 255, 255, 0.8) inset,
+        0 6px 24px rgba(90, 145, 200, 0.12);
+    transition: box-shadow 0.2s ease;
+}
+
+.group-plan-page .agent-feed-card:hover {
+    box-shadow:
+        0 2px 0 rgba(255, 255, 255, 0.8) inset,
+        0 8px 32px rgba(90, 145, 200, 0.16);
+}
+
+/* Header with toggle */
+.group-plan-page .agent-feed-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.group-plan-page .agent-feed-header-left {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex: 1;
+    min-width: 0;
+}
+
+.group-plan-page .agent-feed-header-right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+.group-plan-page .agent-feed-toggle {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 4px 0;
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 0.98rem;
+    font-weight: 600;
+    color: #0b1f38;
+    letter-spacing: 0.03em;
+    transition: color 0.2s;
+}
+
+.group-plan-page .agent-feed-toggle:hover {
+    color: #4a8dc4;
+}
+
+.group-plan-page .agent-feed-toggle-icon {
+    font-size: 0.8rem;
+    color: #9fb3c8;
+    transition: transform 0.2s ease, color 0.2s;
+    display: inline-block;
+}
+
+.group-plan-page .agent-feed-toggle-icon.expanded {
+    color: #4a8dc4;
+}
+
+.group-plan-page .agent-feed-title {
+    font-family: 'Cormorant Garamond', serif;
+    font-size: 0.98rem;
+    font-weight: 600;
+    color: inherit;
+    letter-spacing: 0.03em;
+}
+
+/* Collapsible content */
+.group-plan-page .agent-feed-collapsible {
+    max-height: 600px;
+    overflow: hidden;
+    opacity: 1;
+    transition: max-height 0.3s ease, opacity 0.3s ease, margin-top 0.3s ease;
+}
+
+.group-plan-page .agent-feed-collapsible:not(.expanded) {
+    max-height: 0;
+    opacity: 0;
+    margin-top: 0;
+}
+
+.group-plan-page .agent-feed-collapsible.expanded {
+    margin-top: 12px;
+}
+
+/* List styles */
+.group-plan-page .agent-feed-list {
+    max-height: 320px;
+    overflow-y: auto;
+    scrollbar-color: rgba(74, 141, 196, 0.25) transparent;
+    padding-right: 4px;
+}
+
+.group-plan-page .agent-feed-item {
+    padding: 5px 0;
+    border-bottom: 1px solid rgba(74, 141, 196, 0.07);
+}
+
+.group-plan-page .agent-feed-item:last-child {
+    border-bottom: none;
+}
+
+.group-plan-page .agent-feed-summary {
+    font-family: 'DM Sans', sans-serif;
+    font-size: 0.82rem;
+    color: #1e3a5f;
+    line-height: 1.45;
+    word-break: break-word;
+}
+
+.group-plan-page .agent-feed-thinking {
+    color: #4a8dc4 !important;
+}
+
+.group-plan-page .agent-feed-badge--iter {
+    background: rgba(74, 141, 196, 0.12);
+    color: #1e5a96;
+}
+
+.group-plan-page .agent-feed-badge--time {
+    background: rgba(30, 58, 95, 0.07);
+    color: #6b8fad;
+}
+
+.group-plan-page .agent-feed-badge--count {
+    background: rgba(30, 58, 95, 0.07);
+    color: #6b8fad;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 0.72rem;
+    border-radius: 999px;
+    padding: 1px 8px;
+}
+
+.group-plan-page .agent-feed-expand {
+    color: #9fb3c8;
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 0 2px;
+    font-size: 0.75rem;
+    line-height: 1;
+    transition: color 0.15s;
+}
+
+.group-plan-page .agent-feed-expand:hover {
+    color: #1e5a96;
+}
+
+.group-plan-page .agent-feed-input-inline {
+    color: #6b8fad;
+    white-space: normal;
+    word-break: break-word;
+}
+
+.group-plan-page .agent-feed-detail-label {
+    color: #8ba5c0;
+}
+
+.group-plan-page .agent-feed-detail-pre {
+    background: rgba(210, 232, 248, 0.35);
+    border: 1px solid rgba(74, 141, 196, 0.14);
+    color: #2a4a6a;
+}
+
+.group-plan-page .agent-feed-stop-btn {
+    background: transparent;
+    border: 1px solid rgba(192, 57, 43, 0.35);
+    border-radius: 999px;
+    color: #c0392b;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 0.78rem;
+    font-weight: 500;
+    padding: 4px 14px;
+    letter-spacing: 0.01em;
+    cursor: pointer;
+    transition: background 0.2s, border-color 0.2s;
+}
+
+.group-plan-page .agent-feed-stop-btn:hover {
+    background: rgba(192, 57, 43, 0.06);
+    border-color: #c0392b;
+}
+
+.group-plan-page .agent-feed-preview {
+    color: #8ba5c0;
+    font-style: normal;
+}
+
+/* Reasoning + scratchpad note — sky-theme (dark text on light bg) */
+.group-plan-page .agent-feed-reasoning {
+    color: #6b8fad;
+    font-size: 0.72rem;
+    font-style: italic;
+    margin-top: 0.25rem;
+    line-height: 1.4;
+}
+
+.group-plan-page .agent-feed-scratchpad-note {
+    color: #7a4f0d;
+    background: rgba(202, 138, 4, 0.13);
+    border: 1px solid rgba(202, 138, 4, 0.28);
+    border-radius: 6px;
+    padding: 4px 10px;
+    margin-top: 4px;
+    line-height: 1.45;
+    font-size: 0.79rem;
+}
+
+/* Reasoning toggle button */
+.group-plan-page .agent-feed-reasoning-toggle {
+    background: transparent;
+    border: 1px solid rgba(107, 143, 173, 0.3);
+    border-radius: 4px;
+    padding: 2px 6px;
+    margin-left: 4px;
+    cursor: pointer;
+    font-size: 0.85rem;
+    opacity: 0.6;
+    transition: all 0.2s ease;
+}
+
+.group-plan-page .agent-feed-reasoning-toggle:hover {
+    opacity: 1;
+    background: rgba(107, 143, 173, 0.1);
+}
+
+.group-plan-page .agent-feed-reasoning-toggle.active {
+    opacity: 1;
+    background: rgba(107, 143, 173, 0.15);
+    border-color: rgba(107, 143, 173, 0.5);
+}
+
+/* Reasoning block (expanded) */
+.group-plan-page .agent-feed-reasoning-block {
+    margin-top: 0.5rem;
+    padding: 0.6rem 0.75rem;
+    background: rgba(107, 143, 173, 0.08);
+    border-left: 3px solid rgba(107, 143, 173, 0.4);
+    border-radius: 0 6px 6px 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+}
+
+.group-plan-page .agent-feed-reasoning-label {
+    font-size: 0.65rem;
+    font-weight: 600;
+    color: #6b8fad;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.group-plan-page .agent-feed-reasoning-text {
+    font-size: 0.75rem;
+    color: #4a6a8a;
+    font-style: italic;
+    line-height: 1.5;
+}
+
+/* Agent Feed Layout with Sticky Progress */
+.agent-feed-collapsible {
+  display: flex;
+  flex-direction: column;
+  max-height: 500px;
+}
+
+.agent-feed-collapsible.expanded {
+  overflow: hidden;
+}
+
+/* Sticky progress tracker at top */
+.agent-feed-progress-sticky {
+  flex-shrink: 0;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid rgba(74, 141, 196, 0.15);
+  padding: 0.5rem 0;
+}
+
+/* Scrollable action list */
+.agent-feed-list {
+  flex: 1;
+  overflow-y: auto;
+  padding-right: 4px;
+  scroll-behavior: smooth;
+}
+
+/* Custom scrollbar for the list */
+.agent-feed-list::-webkit-scrollbar {
+  width: 6px;
+}
+
+.agent-feed-list::-webkit-scrollbar-track {
+  background: rgba(74, 141, 196, 0.05);
+  border-radius: 3px;
+}
+
+.agent-feed-list::-webkit-scrollbar-thumb {
+  background: rgba(74, 141, 196, 0.25);
+  border-radius: 3px;
+}
+
+.agent-feed-list::-webkit-scrollbar-thumb:hover {
+  background: rgba(74, 141, 196, 0.4);
+}
+
+/* Hide scrollbar when not hovering */
+.agent-feed-list:not(:hover)::-webkit-scrollbar-thumb {
+  background: rgba(74, 141, 196, 0.15);
+}
+
+/* ═══════════════════════════════════════════════════════════
+   Agent Animations — Supporting styles (appended)
+   ═══════════════════════════════════════════════════════════ */
+
+/* Keyframes for component animations */
+@keyframes agent-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes agent-bounce-subtle {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-3px); }
+}
+
+@keyframes agent-spin-slow {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@keyframes agent-check-stroke {
+  0% { stroke-dashoffset: 20; }
+  100% { stroke-dashoffset: 0; }
+}
+
+/* Agent feed icon sizing */
+.agent-feed-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  font-size: 1.1rem;
+  flex-shrink: 0;
+}
+
+/* Agent feed row layout */
+.agent-feed-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.agent-feed-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.agent-feed-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+/* Badge base styles */
+.agent-feed-badge {
+  font-size: 0.72rem;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-family: "'DM Sans', sans-serif";
+  font-weight: 500;
+}
+
+/* Detail blocks */
+.agent-feed-details {
+  margin-top: 10px;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.6);
+  border-radius: 8px;
+  border: 1px solid rgba(74, 141, 196, 0.15);
+}
+
+.agent-feed-detail-block {
+  margin-bottom: 10px;
+}
+
+.agent-feed-detail-block:last-child {
+  margin-bottom: 0;
+}
+
+.agent-feed-detail-label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 4px;
+  display: block;
+}
+
+.agent-feed-detail-pre {
+  font-size: 0.75rem;
+  padding: 10px;
+  border-radius: 6px;
+  overflow-x: auto;
+  max-height: 150px;
+  overflow-y: auto;
+  margin: 0;
+}
+
+/* Input inline preview */
+.agent-feed-input-inline {
+  font-size: 0.75rem;
+  display: block;
+  margin-top: 4px;
+}
+
+/* Thinking item styling */
+.agent-feed-item--thinking {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 0;
+  opacity: 0.8;
+}
+
+/* Collapsed state refinements */
+.agent-feed-card.collapsed {
+  opacity: 0.85;
+}
+
+.agent-feed-card.collapsed:hover {
+  opacity: 1;
+}
+
+/* Loading phase spinner enhancement */
+@keyframes agent-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* Ensure proper z-index for sticky progress */
+.agent-feed-progress-sticky {
+  background: linear-gradient(180deg, rgba(255,255,255,0.98) 0%, rgba(255,255,255,0.95) 100%);
+}
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+  .agent-feed-item,
+  .research-task,
+  .agent-question-wrapper,
+  .research-progress-bar {
+    animation: none !important;
+    transition: opacity 0.2s ease !important;
+  }
+  
+  .agent-feed-icon {
+    animation: none !important;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════
+   Idea Input — Enhanced loading animations
+   ═══════════════════════════════════════════════════════════ */
+
+@keyframes loading-dots {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+  30% { transform: translateY(-4px); opacity: 1; }
+}
+
+@keyframes progress-shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+@keyframes card-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(74, 141, 196, 0.2); }
+  50% { box-shadow: 0 0 20px 4px rgba(74, 141, 196, 0.15); }
+}
+
+.loading-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: 4px;
+}
+
+.loading-dots span {
+  width: 4px;
+  height: 4px;
+  background: currentColor;
+  border-radius: 50%;
+  animation: loading-dots 1.4s ease-in-out infinite;
+}
+
+.loading-dots span:nth-child(1) { animation-delay: 0s; }
+.loading-dots span:nth-child(2) { animation-delay: 0.2s; }
+.loading-dots span:nth-child(3) { animation-delay: 0.4s; }
+
+/* Submit button loading state */
+.submit-btn.loading {
+  background: linear-gradient(90deg, #3a7bc8 25%, #4A90D9 50%, #3a7bc8 75%);
+  background-size: 200% 100%;
+  animation: progress-shimmer 2s linear infinite;
+}
+
+/* Planning progress card */
+.planning-progress-card {
+  animation: agent-slide-in 0.4s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.planning-progress-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.planning-progress-pulse {
+  width: 8px;
+  height: 8px;
+  background: #4A90D9;
+  border-radius: 50%;
+  position: relative;
+}
+
+.planning-progress-pulse::after {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+  border: 2px solid rgba(74, 141, 196, 0.3);
+  animation: agent-pulse-ring 1.5s ease-out infinite;
+}
+
+/* Progress bar for planning */
+.planning-progress-bar-container {
+  height: 4px;
+  background: rgba(74, 141, 196, 0.15);
+  border-radius: 2px;
+  overflow: hidden;
+  margin-top: 12px;
+}
+
+.planning-progress-bar {
+  height: 100%;
+  background: linear-gradient(90deg, #4A90D9, #6ee7b7);
+  border-radius: 2px;
+  transition: width 0.5s cubic-bezier(0.22, 1, 0.36, 1);
+  position: relative;
+}
+
+.planning-progress-bar::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.4), transparent);
+  background-size: 200% 100%;
+  animation: progress-shimmer 2s linear infinite;
+}
+
+/* Agent slide in keyframe (if not defined elsewhere) */
+@keyframes agent-slide-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Agent pulse ring keyframe */
+@keyframes agent-pulse-ring {
+  0% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(2);
+    opacity: 0;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════
+   Scaffold Review Card — Animation enhancements
+   ═══════════════════════════════════════════════════════════ */
+
+@keyframes spinner-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.spinner-inline {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: spinner-spin 0.8s linear infinite;
+  margin-right: 8px;
+  vertical-align: middle;
+}
+
+/* Day block hover effect */
+.scaffold-day-block {
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.scaffold-day-block:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(74, 141, 196, 0.1);
+}
+
+/* Activity item hover */
+.scaffold-activity-item {
+  transition: all 0.2s ease;
+  padding: 2px 0;
+  border-radius: 4px;
+}
+
+.scaffold-activity-item:hover {
+  background: rgba(74, 141, 196, 0.05);
+  padding-left: 4px;
+}
+
+/* Notes content animation */
+.scaffold-notes-content {
+  transform-origin: top;
+}
+
+/* Button press effect */
+.scaffold-btn {
+  position: relative;
+  overflow: hidden;
+}
+
+.scaffold-btn::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(255,255,255,0.2) 0%, transparent 100%);
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.scaffold-btn:hover::after {
+  opacity: 1;
+}
+
+.scaffold-btn:active {
+  transform: translateY(1px);
+}
+
+/* Approve button shine effect */
+.scaffold-btn-approve {
+  position: relative;
+  overflow: hidden;
+}
+
+.scaffold-btn-approve::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.3),
+    transparent
+  );
+  transition: left 0.5s ease;
+}
+
+.scaffold-btn-approve:hover::before {
+  left: 100%;
+}
+
+/* Section header styling */
+.scaffold-section-header {
+  position: relative;
+  padding-left: 12px;
+}
+
+.scaffold-section-header::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 16px;
+  background: linear-gradient(180deg, #4A90D9, #6ee7b7);
+  border-radius: 2px;
+}
+
+/* ── Nova Act Step Feed ──────────────────────────────────── */
+.booking-steps-section {
+    margin-top: 1rem;
+}
+.booking-steps-list {
+    max-height: 240px;
+    overflow-y: auto;
+    background: rgba(11, 31, 56, 0.06);
+    border-radius: 8px;
+    padding: 0.5rem;
+    font-family: "DM Mono", "SF Mono", monospace;
+    font-size: 0.78rem;
+}
+.booking-step {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
+    padding: 0.2rem 0.25rem;
+    line-height: 1.4;
+    color: #1a3a5c;
+}
+.booking-step--navigate {
+    font-weight: 500;
+}
+.booking-step--log {
+    opacity: 0.65;
+}
+.booking-step-icon {
+    flex-shrink: 0;
+    width: 1.1rem;
+}
+.booking-step-text {
+    word-break: break-word;
+}
+
+
