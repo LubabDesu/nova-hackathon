@@ -197,6 +197,7 @@ class ReoptimizeTimingsRequest(BaseModel):
     wake_time: str = "09:00"
 
 
+<<<<<<< HEAD
 # ── Group Trip Models ────────────────────────────────────────────────────────
 
 class CreateGroupTripRequest(BaseModel):
@@ -256,3 +257,20 @@ class TripChatRequest(BaseModel):
 class TripChatResponse(BaseModel):
     updated_nodes: list[dict]
     reply: str
+=======
+# ── Booking models ────────────────────────────────────────────────────────────
+
+class BookingStartRequest(BaseModel):
+    restaurant_name: str = Field(..., min_length=1)
+    city: str = Field(..., min_length=1)
+    date: str = Field(..., pattern=r"^\d{4}-\d{2}-\d{2}$")
+    time: str = Field(..., pattern=r"^\d{2}:\d{2}$")
+    party_size: int = Field(..., ge=1, le=20)
+
+
+class BookingResumeRequest(BaseModel):
+    phone: str | None = Field(default=None, min_length=1)
+    email: str | None = Field(default=None, min_length=1)
+    password: str | None = Field(default=None, min_length=1)
+    notes: str | None = None
+>>>>>>> 5b82fa2e71d27a972ba37699c3f642d6766b64a8

@@ -13,10 +13,15 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from routes.bookings import router as bookings_router
 from routes.ideas import router as ideas_router
+<<<<<<< HEAD
 from routes.group_trips import router as group_trips_router
 from routes.group_plan import router as group_plan_router
 # skip certificate check
 ssl._create_default_https_context = ssl._create_unverified_context
+=======
+from routes.bookings import router as bookings_router
+
+>>>>>>> 5b82fa2e71d27a972ba37699c3f642d6766b64a8
 logging.basicConfig(level=logging.INFO)
 
 # Load .env from repo root so model/env settings are applied consistently.
@@ -41,8 +46,12 @@ app.add_middleware(
 # ── Routers ─────────────────────────────────────────────────────────────────
 app.include_router(bookings_router)
 app.include_router(ideas_router)
+<<<<<<< HEAD
 app.include_router(group_trips_router)
 app.include_router(group_plan_router)
+=======
+app.include_router(bookings_router)
+>>>>>>> 5b82fa2e71d27a972ba37699c3f642d6766b64a8
 
 
 @app.get("/")

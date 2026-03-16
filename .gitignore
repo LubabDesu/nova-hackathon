@@ -46,6 +46,7 @@ pnpm-debug.log*
 # Claude Code sessions / plans (local only)
 .claude/sessions/
 .claude/projects/
+.claude
 
 # Nova Act screenshots / recordings
 screenshots/

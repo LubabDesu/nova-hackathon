@@ -1,32 +1,27 @@
 // NovaSync — Booking Panel component
-// Shows restaurant booking form with live agent progress via SSE.
-// Connects to /api/bookings/book for automated reservation handling.
+// Session-based HITL flow: start → stream → pause for phone → resume → result
 
 import { useState, useRef, useCallback, useEffect } from "react";
-import { createPortal } from "react-dom";
-import { startBookingStream, resumeBooking, type BookingLogEvent, type BookingResult, type BookingStepEvent } from "../services/bookingApi";
-import type { NeedsAuthEvent, NeedsCourseReviewEvent } from "../types";
+import {
+    startBooking,
+    streamBooking,
+    resumeBooking,
+    cancelBooking,
+    type BookingLogEvent,
+    type BookingResult,
+} from "../services/bookingApi";
+import type { BookingStartRequest, BookingResumeData } from "../types";
 import BookingStatusBadge from "./BookingStatusBadge";
+
+type BookingStatus = "idle" | "starting" | "streaming" | "waiting_for_user" | "done" | "error";
 
 interface BookingPanelProps {
     restaurantName: string;
-    restaurantDescription?: string | null;
-    tripLocation?: string | null;
-    restaurantUrl?: string | null;
+    city: string;
     date: string;
     time: string;
     partySize: number;
-}
-
-function stepIcon(action: BookingStepEvent["action"]): string {
-    const icons: Record<string, string> = {
-        navigate: "🌐",
-        phase: "▶",
-        log: "·",
-        click: "🖱",
-        type: "⌨",
-    };
-    return icons[action] ?? "·";
+    onClose?: () => void;
 }
 
 interface LogEntry {
@@ -38,68 +33,27 @@ interface LogEntry {
 
 export default function BookingPanel({
     restaurantName,
-    restaurantDescription,
-    tripLocation,
-    restaurantUrl,
+    city,
     date,
     time,
     partySize,
+    onClose: _onClose,
 }: BookingPanelProps) {
-    const [phoneNumber, setPhoneNumber] = useState("");
-    const [guestCount, setGuestCount] = useState(partySize);
-    const [isLoading, setIsLoading] = useState(false);
+    const [status, setStatus] = useState<BookingStatus>("idle");
+    const [sessionId, setSessionId] = useState<string | null>(null);
     const [logs, setLogs] = useState<LogEntry[]>([]);
     const [screenshot, setScreenshot] = useState<string | null>(null);
     const [result, setResult] = useState<BookingResult | null>(null);
     const [error, setError] = useState<string | null>(null);
-    const [steps, setSteps] = useState<BookingStepEvent[]>([]);
-    const [bookingId, setBookingId] = useState<string | null>(null);
-    const [needsAuth, setNeedsAuth] = useState<NeedsAuthEvent | null>(null);
-    const [needsCourseReview, setNeedsCourseReview] = useState<NeedsCourseReviewEvent | null>(null);
-    const [isScreenshotExpanded, setIsScreenshotExpanded] = useState(false);
-    const [currentUrl, setCurrentUrl] = useState("");
-    const [elapsedSeconds, setElapsedSeconds] = useState(0);
-    const [screenshotFlash, setScreenshotFlash] = useState(false);
+    const [waitingFields, setWaitingFields] = useState<string[]>([]);
+
+    // Sensitive input state — kept local, never in logs
+    const [phone, setPhone] = useState("");
+    const [resumeEmail, setResumeEmail] = useState("");
+
     const logIdRef = useRef(0);
     const abortControllerRef = useRef<AbortController | null>(null);
-    const stepsListRef = useRef<HTMLDivElement | null>(null);
-    const sidebarRef = useRef<HTMLDivElement | null>(null);
-    const theaterFeedRef = useRef<HTMLDivElement | null>(null);
-
-    // Auto-scroll the step feed to the bottom whenever a new step arrives.
-    useEffect(() => {
-        const el = stepsListRef.current;
-        if (el) el.scrollTop = el.scrollHeight;
-    }, [steps]);
-
-    // Auto-scroll the fullscreen sidebar to the bottom on new steps/logs.
-    useEffect(() => {
-        const el = sidebarRef.current;
-        if (el) el.scrollTop = el.scrollHeight;
-    }, [steps, logs]);
-
-    // Auto-scroll the theater feed to the bottom on new steps/logs.
-    useEffect(() => {
-        const el = theaterFeedRef.current;
-        if (el) el.scrollTop = el.scrollHeight;
-    }, [steps, logs]);
-
-    // Elapsed timer — ticks while loading, resets on stop.
-    useEffect(() => {
-        if (!isLoading) { setElapsedSeconds(0); return; }
-        const interval = setInterval(() => setElapsedSeconds(s => s + 1), 1000);
-        return () => clearInterval(interval);
-    }, [isLoading]);
-
-    // Close fullscreen modal on Escape key.
-    useEffect(() => {
-        if (!isScreenshotExpanded) return;
-        const handler = (e: KeyboardEvent) => {
-            if (e.key === "Escape") setIsScreenshotExpanded(false);
-        };
-        window.addEventListener("keydown", handler);
-        return () => window.removeEventListener("keydown", handler);
-    }, [isScreenshotExpanded]);
+    const sessionIdRef = useRef<string | null>(null);
 
     const addLog = useCallback((message: string, type: LogEntry["type"] = "info") => {
         if (message.startsWith("Task:")) return;
@@ -107,305 +61,250 @@ export default function BookingPanel({
         setLogs((prev) => [...prev, { id, timestamp: new Date(), message, type }]);
     }, []);
 
-    const formatTime = (date: Date): string => {
-        return date.toLocaleTimeString("en-US", {
-            hour: "2-digit",
-            minute: "2-digit",
-            second: "2-digit",
-            hour12: false,
-        });
-    };
+    const formatTime = (d: Date): string =>
+        d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
 
-    const formatElapsed = (s: number) =>
-        `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
+    // Cleanup on unmount
+    useEffect(() => {
+        return () => {
+            abortControllerRef.current?.abort();
+            if (sessionIdRef.current) {
+                cancelBooking(sessionIdRef.current);
+            }
+        };
+    }, []);
 
-    const handleStartBooking = async () => {
-        if (!phoneNumber.trim()) {
-            setError("Please enter a phone number for the booking");
-            return;
-        }
-
-        setIsScreenshotExpanded(true);
-
-        // Reset state
-        setIsLoading(true);
+    const handleStart = async () => {
+        setStatus("starting");
         setLogs([]);
         setScreenshot(null);
         setResult(null);
         setError(null);
-        setSteps([]);
-        setBookingId(null);
-        setNeedsAuth(null);
-        setNeedsCourseReview(null);
+        setWaitingFields([]);
         logIdRef.current = 0;
 
-        addLog("Initializing Nova Act booking agent...", "info");
-
-        // Create abort controller for cancellation
-        abortControllerRef.current = new AbortController();
-
         try {
-            await startBookingStream(
+            const req: BookingStartRequest = {
+                restaurant_name: restaurantName,
+                city,
+                date,
+                time,
+                party_size: partySize,
+            };
+            addLog("Starting booking session...", "info");
+            const { session_id } = await startBooking(req);
+            setSessionId(session_id);
+            sessionIdRef.current = session_id;
+
+            setStatus("streaming");
+            addLog("Connected to Nova Act agent", "info");
+
+            abortControllerRef.current = new AbortController();
+            await streamBooking(
+                session_id,
                 {
-                    restaurant_name: restaurantName,
-                    restaurant_description: restaurantDescription,
-                    trip_location: tripLocation,
-                    restaurant_url: restaurantUrl,
-                    date,
-                    time,
-                    party_size: guestCount,
-                    phone_number: phoneNumber,
-                },
-                {
-                    onLog: (event: BookingLogEvent) => {
-                        addLog(event.message, event.type);
+                    onLog: (event: BookingLogEvent) => addLog(event.message, event.type),
+                    onScreenshot: (data: string) => setScreenshot(data),
+                    onNeedsUserInput: ({ fields }) => {
+                        setWaitingFields(fields);
+                        setStatus("waiting_for_user");
+                        addLog("Agent is waiting for your input...", "info");
                     },
-                    onScreenshot: (screenshotData: string) => {
-                        setScreenshot(screenshotData);
-                        setScreenshotFlash(true);
-                        setTimeout(() => setScreenshotFlash(false), 250);
-                    },
-                    onConnected: (id: string) => {
-                        setBookingId(id);
-                    },
-                    onResult: (bookingResult: BookingResult) => {
-                        setResult(bookingResult);
-                        setNeedsAuth(null);
-                        setNeedsCourseReview(null);
-                        setIsLoading(false);
-                        if (bookingResult.success) {
-                            addLog("✅ Booking completed successfully!", "success");
+                    onResult: (r: BookingResult) => {
+                        setResult(r);
+                        setStatus("done");
+                        sessionIdRef.current = null;
+                        if (r.success) {
+                            addLog("Booking completed successfully!", "success");
                         } else {
-                            addLog(`❌ Booking failed: ${bookingResult.error || "Unknown error"}`, "error");
+                            addLog(`Booking failed: ${r.error ?? "Unknown error"}`, "error");
                         }
                     },
-                    onError: (err: string) => {
-                        setError(err);
-                        setIsLoading(false);
-                        addLog(`❌ Error: ${err}`, "error");
-                    },
-                    onStep: (event) => {
-                        setSteps(prev => [...prev, event]);
-                        if (event.action === "navigate") {
-                            const urlMatch = event.text?.match(/https?:\/\/[^\s]+/);
-                            if (urlMatch) setCurrentUrl(urlMatch[0]);
-                        }
-                    },
-                    onNeedsAuth: (event: NeedsAuthEvent) => {
-                        setNeedsAuth(event);
-                        addLog("🔐 Sign-in required — waiting for user action…", "action");
-                    },
-                    onNeedsCourseReview: (event: NeedsCourseReviewEvent) => {
-                        setNeedsCourseReview(event);
-                        addLog("📋 Course review required — waiting for user confirmation…", "action");
+                    onError: (msg: string) => {
+                        setError(msg);
+                        setStatus("error");
+                        sessionIdRef.current = null;
+                        addLog(`Error: ${msg}`, "error");
                     },
                 },
                 abortControllerRef.current.signal
             );
         } catch (err) {
-            const errorMessage = err instanceof Error ? err.message : "Booking request failed";
-            setError(errorMessage);
-            setIsLoading(false);
-            addLog(`❌ Error: ${errorMessage}`, "error");
+            const msg = err instanceof Error ? err.message : "Booking failed";
+            setError(msg);
+            setStatus("error");
+            addLog(`Error: ${msg}`, "error");
         }
     };
 
-    const handleCancel = () => {
-        abortControllerRef.current?.abort();
-        setIsLoading(false);
-        addLog("Booking cancelled by user", "info");
+    const handleResume = async () => {
+        if (!sessionId) return;
+        const data: BookingResumeData = {
+            phone: phone.trim() || undefined,
+            email: resumeEmail.trim() || undefined,
+        };
+        try {
+            await resumeBooking(sessionId, data);
+            setStatus("streaming");
+            setPhone("");
+            setResumeEmail("");
+            addLog("Sensitive info submitted, agent resuming...", "info");
+        } catch (err) {
+            const msg = err instanceof Error ? err.message : "Failed to resume";
+            setError(msg);
+            setStatus("error");
+        }
     };
 
-    const getStatus = (): "pending" | "confirmed" | "failed" => {
+    const handleCancel = async () => {
+        abortControllerRef.current?.abort();
+        if (sessionIdRef.current) {
+            await cancelBooking(sessionIdRef.current);
+            sessionIdRef.current = null;
+        }
+        setSessionId(null);
+        setStatus("idle");
+        addLog("Booking cancelled", "info");
+    };
+
+    const getBadgeStatus = (): "pending" | "confirmed" | "failed" => {
         if (result?.success) return "confirmed";
-        if (result && !result.success) return "failed";
-        if (isLoading) return "pending";
+        if (status === "error" || (result && !result.success)) return "failed";
         return "pending";
     };
+
+    const isActive = status === "starting" || status === "streaming" || status === "waiting_for_user";
 
     return (
         <div className="glass-card booking-panel">
             <div className="booking-panel-header">
                 <div className="booking-panel-title-row">
                     <h3 className="booking-panel-title">🍽️ Book a Table</h3>
-                    <BookingStatusBadge status={getStatus()} />
+                    {status !== "idle" && <BookingStatusBadge status={getBadgeStatus()} />}
                 </div>
-                <p className="booking-panel-subtitle">
-                    Nova Act will automate the reservation for you
-                </p>
+                <p className="booking-panel-subtitle">Nova Act will automate the reservation for you</p>
             </div>
 
-            {/* Restaurant Details */}
+            {/* Restaurant info */}
             <div className="booking-restaurant-info">
                 <div className="booking-info-row">
                     <span className="booking-info-label">Restaurant</span>
                     <span className="booking-info-value">{restaurantName}</span>
                 </div>
                 <div className="booking-info-row">
+                    <span className="booking-info-label">Location</span>
+                    <span className="booking-info-value">{city}</span>
+                </div>
+                <div className="booking-info-row">
                     <span className="booking-info-label">Date & Time</span>
-                    <span className="booking-info-value">
-                        {date} at {time}
-                    </span>
+                    <span className="booking-info-value">{date} at {time}</span>
                 </div>
-                <div className="booking-info-row" style={{ alignItems: "center" }}>
+                <div className="booking-info-row">
                     <span className="booking-info-label">Party Size</span>
-                    <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-                        <button
-                            type="button"
-                            onClick={() => setGuestCount((n) => Math.max(1, n - 1))}
-                            disabled={isLoading || guestCount <= 1}
-                            style={{ width: 28, height: 28, borderRadius: "50%", border: "1.5px solid currentColor", background: "none", cursor: "pointer", fontSize: "1rem", lineHeight: 1 }}
-                        >−</button>
-                        <span className="booking-info-value">{guestCount} {guestCount === 1 ? "person" : "people"}</span>
-                        <button
-                            type="button"
-                            onClick={() => setGuestCount((n) => Math.min(20, n + 1))}
-                            disabled={isLoading || guestCount >= 20}
-                            style={{ width: 28, height: 28, borderRadius: "50%", border: "1.5px solid currentColor", background: "none", cursor: "pointer", fontSize: "1rem", lineHeight: 1 }}
-                        >+</button>
-                    </div>
+                    <span className="booking-info-value">{partySize} people</span>
                 </div>
-                {restaurantDescription && (
-                    <div className="booking-info-row" style={{ flexDirection: "column", gap: "0.25rem" }}>
-                        <span className="booking-info-label">Looking for</span>
-                        <span className="booking-info-value" style={{ fontStyle: "italic", fontSize: "0.85em", opacity: 0.85 }}>
-                            {restaurantDescription}
-                        </span>
-                    </div>
-                )}
-                {restaurantUrl && (
-                    <a
-                        href={restaurantUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="booking-url-link"
-                    >
-                        View restaurant page →
-                    </a>
-                )}
             </div>
 
-            {/* Phone Input */}
-            <div className="booking-phone-section">
-                <label className="booking-phone-label" htmlFor="phone-input">
-                    Phone Number <span className="booking-required">*</span>
-                    <span className="booking-phone-hint">(required by Japanese restaurants)</span>
-                </label>
-                <input
-                    id="phone-input"
-                    type="tel"
-                    className="sky-input"
-                    placeholder="+81 90 1234 5678"
-                    value={phoneNumber}
-                    onChange={(e) => setPhoneNumber(e.target.value)}
-                    disabled={isLoading}
-                />
-                {error && !phoneNumber.trim() && (
-                    <span className="booking-error-text">{error}</span>
-                )}
-            </div>
-
-            {/* Action Buttons */}
-            <div className="booking-actions">
-                {isLoading ? (
-                    <button
-                        type="button"
-                        className="sky-btn-danger"
-                        onClick={handleCancel}
-                    >
-                        ⏹ Cancel Booking
-                    </button>
-                ) : (
-                    <button
-                        type="button"
-                        className="sky-btn-primary"
-                        onClick={handleStartBooking}
-                        disabled={!phoneNumber.trim()}
-                    >
+            {/* Idle: start button */}
+            {status === "idle" && (
+                <div className="booking-actions">
+                    <button type="button" className="sky-btn-primary" onClick={handleStart}>
                         🤖 Book with Nova Act
                     </button>
-                )}
-            </div>
+                </div>
+            )}
 
-            {/* Auth Pause Card — shown when Nova Act hits a sign-in wall */}
-            {needsAuth && (
-                <div className="booking-auth-card">
-                    <span>🔐 Sign-in Required</span>
-                    <p>{needsAuth.message}</p>
-                    <p style={{ fontSize: "0.8em", opacity: 0.75, margin: "0.25rem 0 0" }}>
-                        Sign in directly in the Nova Act browser window on your screen.
-                    </p>
-                    <button
-                        type="button"
-                        onClick={async () => {
-                            if (!bookingId) return;
-                            await resumeBooking(bookingId);
-                            setNeedsAuth(null);
-                            addLog("Resuming booking after sign-in…", "info");
-                        }}
-                    >
-                        I've signed in — Continue
+            {/* Starting spinner */}
+            {status === "starting" && (
+                <div className="booking-actions">
+                    <span style={{ color: "#4a6a8a", fontSize: "0.9rem" }}>Initializing agent...</span>
+                </div>
+            )}
+
+            {/* Active: cancel button */}
+            {(status === "streaming" || status === "waiting_for_user") && (
+                <div className="booking-actions">
+                    <button type="button" className="sky-btn-danger" onClick={handleCancel}>
+                        ⏹ Cancel Booking
                     </button>
                 </div>
             )}
 
-            {/* Course Review Card — shown when Nova Act has filled all fields and awaits human confirm */}
-            {needsCourseReview && (
-                <div className="booking-auth-card">
-                    <span>📋 Review &amp; Confirm Booking</span>
-                    <p>{needsCourseReview.message}</p>
-                    {needsCourseReview.summary && (
-                        <details style={{ marginTop: "0.5rem", fontSize: "0.82em", opacity: 0.85 }}>
-                            <summary style={{ cursor: "pointer" }}>What Nova Act filled in</summary>
-                            <pre style={{ whiteSpace: "pre-wrap", marginTop: "0.4rem", fontFamily: "inherit" }}>
-                                {needsCourseReview.summary}
-                            </pre>
-                        </details>
+            {/* HITL: sensitive fields form */}
+            {status === "waiting_for_user" && (
+                <div className="booking-phone-section" style={{ marginTop: 16, padding: "1rem", background: "rgba(74,141,196,0.08)", borderRadius: 8, border: "1px solid rgba(74,141,196,0.2)" }}>
+                    {waitingFields.includes("manual_required") ? (
+                        <p style={{ color: "#4a6a8a", fontSize: "0.9rem", margin: 0 }}>
+                            ⚠️ Agent couldn't complete this step automatically. Please finish the booking manually in the browser window.
+                        </p>
+                    ) : (
+                        <>
+                            <p style={{ color: "#0b1f38", fontSize: "0.88rem", fontWeight: 600, marginBottom: 12 }}>
+                                🔒 Agent needs your contact details to proceed:
+                            </p>
+                            {waitingFields.includes("phone") && (
+                                <div style={{ marginBottom: 10 }}>
+                                    <label className="booking-phone-label" htmlFor="resume-phone">
+                                        Phone Number <span className="booking-required">*</span>
+                                        <span className="booking-phone-hint">(required by Japanese restaurants)</span>
+                                    </label>
+                                    <input
+                                        id="resume-phone"
+                                        type="tel"
+                                        className="sky-input"
+                                        placeholder="+81 90 1234 5678"
+                                        value={phone}
+                                        onChange={(e) => setPhone(e.target.value)}
+                                    />
+                                </div>
+                            )}
+                            {waitingFields.includes("email") && (
+                                <div style={{ marginBottom: 10 }}>
+                                    <label className="booking-phone-label" htmlFor="resume-email">Email</label>
+                                    <input
+                                        id="resume-email"
+                                        type="email"
+                                        className="sky-input"
+                                        placeholder="you@example.com"
+                                        value={resumeEmail}
+                                        onChange={(e) => setResumeEmail(e.target.value)}
+                                    />
+                                </div>
+                            )}
+                            <button
+                                type="button"
+                                className="sky-btn-primary"
+                                style={{ marginTop: 8 }}
+                                onClick={handleResume}
+                                disabled={waitingFields.includes("phone") && !phone.trim()}
+                            >
+                                Continue Booking →
+                            </button>
+                        </>
                     )}
-                    <button
-                        type="button"
-                        onClick={async () => {
-                            if (!bookingId) return;
-                            await resumeBooking(bookingId);
-                            setNeedsCourseReview(null);
-                            addLog("Resuming after booking confirmation…", "info");
-                        }}
-                    >
-                        I've confirmed — Continue
+                </div>
+            )}
+
+            {/* Error banner */}
+            {error && status === "error" && (
+                <div className="booking-error-banner" style={{ marginTop: 12 }}>
+                    {error}
+                    <button type="button" className="sky-btn-secondary" style={{ marginTop: 8, display: "block" }} onClick={() => setStatus("idle")}>
+                        Try Again
                     </button>
                 </div>
             )}
 
-            {/* Error Message */}
-            {error && phoneNumber.trim() && (
-                <div className="booking-error-banner">{error}</div>
-            )}
-
-            {/* Live Screenshot */}
-            {(screenshot || isLoading) && (
+            {/* Live screenshot */}
+            {(screenshot || isActive) && (
                 <div className="booking-screenshot-section">
                     <div className="booking-section-header">
                         <span className="booking-section-title">🖥️ Live Browser View</span>
-                        {isLoading && <span className="agent-feed-pulse" />}
-                        {screenshot && (
-                            <button
-                                type="button"
-                                className="booking-screenshot-expand-btn"
-                                onClick={() => setIsScreenshotExpanded(true)}
-                                title="Expand to fullscreen"
-                            >
-                                ⛶ Expand
-                            </button>
-                        )}
+                        {isActive && <span className="agent-feed-pulse" />}
                     </div>
                     <div className="booking-screenshot-container">
                         {screenshot ? (
-                            <img
-                                src={`data:image/jpeg;base64,${screenshot}`}
-                                alt="Current browser state"
-                                className="booking-screenshot"
-                                onClick={() => setIsScreenshotExpanded(true)}
-                            />
+                            <img src={`data:image/png;base64,${screenshot}`} alt="Current browser state" className="booking-screenshot" />
                         ) : (
                             <div className="booking-screenshot-placeholder">
                                 <span className="booking-screenshot-spinner">⟳</span>
@@ -416,215 +315,49 @@ export default function BookingPanel({
                 </div>
             )}
 
-            {/* Operations Theater — full-viewport portal */}
-            {isScreenshotExpanded && createPortal(
-                <div className="bt-overlay" onClick={() => setIsScreenshotExpanded(false)}>
-                    {/* Top bar */}
-                    <div className="bt-topbar" onClick={e => e.stopPropagation()}>
-                        {isLoading && (
-                            <span className="bt-live-badge">
-                                <span className="bt-live-dot" />
-                                LIVE
-                            </span>
-                        )}
-                        <span className="bt-topbar-brand">Nova Act</span>
-                        <span className="bt-topbar-sep">·</span>
-                        <span className="bt-topbar-restaurant">{restaurantName}</span>
-                        <span className="bt-topbar-meta">
-                            {guestCount} {guestCount === 1 ? "guest" : "guests"} · {date} {time}
-                        </span>
-                        {isLoading && (
-                            <span className="bt-elapsed">{formatElapsed(elapsedSeconds)}</span>
-                        )}
-                        <button
-                            type="button"
-                            className="bt-close"
-                            onClick={() => setIsScreenshotExpanded(false)}
-                            title="Close (Esc)"
-                        >✕</button>
-                    </div>
-
-                    {/* Split body */}
-                    <div className="bt-body" onClick={e => e.stopPropagation()}>
-                        {/* Left: browser frame + screenshot */}
-                        <div className="bt-viewport">
-                            <div className="bt-browser-chrome">
-                                <span className="bt-traffic-lights">
-                                    <span /><span /><span />
-                                </span>
-                                <span className="bt-url-bar">
-                                    {currentUrl || "nova-act://initializing…"}
-                                </span>
-                                {isLoading && <span className="bt-loading-ring" />}
-                            </div>
-                            <div className={`bt-screenshot-wrap${screenshotFlash ? " bt-screenshot-wrap--flash" : ""}`}>
-                                {screenshot ? (
-                                    <img
-                                        src={`data:image/jpeg;base64,${screenshot}`}
-                                        alt="Live browser view"
-                                        className="bt-screenshot"
-                                    />
-                                ) : (
-                                    <div className="bt-placeholder">
-                                        <div className="bt-shimmer" />
-                                        <span>Waiting for first frame…</span>
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-
-                        {/* Right: activity feed */}
-                        <div className="bt-feed">
-                            <div className="bt-feed-header">
-                                <span>⚡ Live Actions</span>
-                                {isLoading && <span className="bt-feed-pulse" />}
-                            </div>
-                            <div className="bt-feed-entries" ref={theaterFeedRef}>
-                                {steps.map((step, i) => (
-                                    <div key={i} className={`bt-entry bt-entry--${step.action}`}>
-                                        <span className="bt-entry-icon">{stepIcon(step.action)}</span>
-                                        <span className="bt-entry-text">{step.text}</span>
-                                    </div>
-                                ))}
-                                {logs.map(log => (
-                                    <div key={log.id} className={`bt-entry bt-entry--log bt-entry--${log.type}`}>
-                                        <span className="bt-entry-time">{formatTime(log.timestamp)}</span>
-                                        <span className="bt-entry-text">{log.message}</span>
-                                    </div>
-                                ))}
-                                {isLoading && (
-                                    <div className="bt-entry bt-entry--thinking">
-                                        <span className="bt-entry-icon">
-                                            <span className="bt-dots"><span/><span/><span/></span>
-                                        </span>
-                                        <span className="bt-entry-text">Processing…</span>
-                                    </div>
-                                )}
-                            </div>
-
-                            {/* HITL cards at feed bottom */}
-                            {needsAuth && (
-                                <div className="bt-hitl-card">
-                                    <div className="bt-hitl-title">🔐 Sign-in Required</div>
-                                    <p className="bt-hitl-msg">{needsAuth.message}</p>
-                                    <p className="bt-hitl-msg" style={{ fontSize: "0.8em", opacity: 0.75, marginTop: "0.25rem" }}>
-                                        The Nova Act browser window is open on your screen — sign in directly there.
-                                    </p>
-                                    <button type="button" className="bt-hitl-btn"
-                                        onClick={async () => {
-                                            if (!bookingId) return;
-                                            await resumeBooking(bookingId);
-                                            setNeedsAuth(null);
-                                            addLog("Resuming after sign-in…", "info");
-                                        }}>
-                                        I've signed in — Continue
-                                    </button>
-                                </div>
-                            )}
-                            {needsCourseReview && (
-                                <div className="bt-hitl-card">
-                                    <div className="bt-hitl-title">📋 Review Booking</div>
-                                    <p className="bt-hitl-msg">{needsCourseReview.message}</p>
-                                    <button type="button" className="bt-hitl-btn"
-                                        onClick={async () => {
-                                            if (!bookingId) return;
-                                            await resumeBooking(bookingId);
-                                            setNeedsCourseReview(null);
-                                            addLog("Resuming after confirmation…", "info");
-                                        }}>
-                                        Confirmed — Continue
-                                    </button>
-                                </div>
-                            )}
-                        </div>
-                    </div>
-                </div>,
-                document.body
-            )}
-
-            {/* Live Actions Step Feed */}
-            {steps.length > 0 && (
-                <div className="booking-steps-section">
-                    <div className="booking-section-header">
-                        <span className="booking-section-title">⚡ Live Actions</span>
-                        {isLoading && <span className="agent-feed-pulse" />}
-                    </div>
-                    <div className="booking-steps-list" ref={stepsListRef}>
-                        {steps.map((step, i) => (
-                            <div
-                                key={i}
-                                className={`booking-step booking-step--${step.action}`}
-                            >
-                                <span className="booking-step-icon">
-                                    {stepIcon(step.action)}
-                                </span>
-                                <span className="booking-step-text">{step.text}</span>
-                            </div>
-                        ))}
-                    </div>
-                </div>
-            )}
-
-            {/* Live Logs Feed */}
-            {(logs.length > 0 || isLoading) && (
+            {/* Live logs */}
+            {logs.length > 0 && (
                 <div className="booking-logs-section">
                     <div className="booking-section-header">
                         <span className="booking-section-title">
-                            {isLoading ? "🤖 Agent is working..." : "Agent activity log"}
+                            {isActive ? "🤖 Agent is working..." : "Agent activity log"}
                         </span>
-                        {isLoading && <span className="agent-feed-pulse" />}
-                        {!isLoading && logs.length > 0 && (
-                            <span className="agent-feed-badge agent-feed-badge--count">
-                                {logs.length} entries
-                            </span>
-                        )}
+                        {isActive && <span className="agent-feed-pulse" />}
+                        {!isActive && <span className="agent-feed-badge agent-feed-badge--count">{logs.length} entries</span>}
                     </div>
                     <div className="booking-logs-list">
                         {logs.map((log) => (
-                            <div
-                                key={log.id}
-                                className={`booking-log-item booking-log-item--${log.type}`}
-                            >
+                            <div key={log.id} className={`booking-log-item booking-log-item--${log.type}`}>
                                 <span className="booking-log-time">{formatTime(log.timestamp)}</span>
                                 <span className="booking-log-message">{log.message}</span>
                             </div>
                         ))}
-                        {isLoading && (
+                        {isActive && (
                             <div className="booking-log-item booking-log-item--thinking">
                                 <span className="booking-log-time">{formatTime(new Date())}</span>
-                                <span className="booking-log-message booking-log-thinking">
-                                    💭 Processing...
-                                </span>
+                                <span className="booking-log-message booking-log-thinking">💭 Processing...</span>
                             </div>
                         )}
                     </div>
                 </div>
             )}
 
-            {/* Final Result */}
+            {/* Result */}
             {result && (
                 <div className={`booking-result booking-result--${result.success ? "success" : "error"}`}>
                     <div className="booking-result-header">
-                        <span className="booking-result-icon">
-                            {result.success ? "✅" : "❌"}
-                        </span>
-                        <span className="booking-result-title">
-                            {result.success ? "Booking Confirmed!" : "Booking Failed"}
-                        </span>
+                        <span className="booking-result-icon">{result.success ? "✅" : "❌"}</span>
+                        <span className="booking-result-title">{result.success ? "Booking Confirmed!" : "Booking Failed"}</span>
                     </div>
                     {result.success && result.details && (
                         <div className="booking-result-details">
                             <div className="booking-result-row">
                                 <span className="booking-result-label">Confirmation #</span>
-                                <span className="booking-result-value">
-                                    {result.details.confirmation_number || "N/A"}
-                                </span>
+                                <span className="booking-result-value">{result.details.confirmation_number ?? "N/A"}</span>
                             </div>
                             <div className="booking-result-row">
                                 <span className="booking-result-label">Booking Time</span>
-                                <span className="booking-result-value">
-                                    {result.details.booking_time || "N/A"}
-                                </span>
+                                <span className="booking-result-value">{result.details.booking_time ?? "N/A"}</span>
                             </div>
                             {result.details.notes && (
                                 <div className="booking-result-notes">
@@ -635,9 +368,7 @@ export default function BookingPanel({
                         </div>
                     )}
                     {!result.success && result.error && (
-                        <div className="booking-result-error">
-                            <p>{result.error}</p>
-                        </div>
+                        <div className="booking-result-error"><p>{result.error}</p></div>
                     )}
                 </div>
             )}

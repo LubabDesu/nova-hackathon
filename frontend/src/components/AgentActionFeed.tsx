@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 // NovaSync — Agent action feed component (Animated Edition)
+=======
+// NovaSync — Agent action feed component
+>>>>>>> 5b82fa2e71d27a972ba37699c3f642d6766b64a8
 // Shows real-time tool calls during the Nova agent planning phase.
 // Includes collapsible view, research progress tracking, and a Stop button.
 
@@ -24,6 +28,7 @@ const TOOL_ICONS: Record<string, string> = {
     ask_user: "❓",
 };
 
+<<<<<<< HEAD
 const TOOL_LABELS: Record<string, string> = {
     search_activities: "Searching activities",
     get_local_events: "Finding events",
@@ -35,14 +40,19 @@ const TOOL_LABELS: Record<string, string> = {
     ask_user: "Asking question",
 };
 
+=======
+>>>>>>> 5b82fa2e71d27a972ba37699c3f642d6766b64a8
 function getToolIcon(toolName: string): string {
     return TOOL_ICONS[toolName] ?? "⚙️";
 }
 
+<<<<<<< HEAD
 function getToolLabel(toolName: string): string {
     return TOOL_LABELS[toolName] ?? toolName.replace(/_/g, " ");
 }
 
+=======
+>>>>>>> 5b82fa2e71d27a972ba37699c3f642d6766b64a8
 function formatElapsed(ms: number | undefined): string {
     if (ms === undefined) return "";
     if (ms < 1000) return `${ms}ms`;
@@ -56,6 +66,7 @@ function formatToolInput(input: Record<string, unknown> | undefined): string {
         .join(" · ");
 }
 
+<<<<<<< HEAD
 // Animated typing dots component
 function ThinkingDots() {
     return (
@@ -73,10 +84,14 @@ interface ActionItemProps {
 }
 
 function ActionItem({ action, index }: ActionItemProps) {
+=======
+function ActionItem({ action }: { action: AgentActionEvent }) {
+>>>>>>> 5b82fa2e71d27a972ba37699c3f642d6766b64a8
     const [expanded, setExpanded] = useState(false);
     const [showReasoning, setShowReasoning] = useState(false);
     const hasDetail = !!(action.result_preview || action.tool_input);
     const hasReasoning = !!(action.reasoning && action.reasoning.trim().length > 0);
+<<<<<<< HEAD
     const itemRef = useRef<HTMLDivElement>(null);
 
     // Scroll into view when this is the newest item
@@ -99,6 +114,15 @@ function ActionItem({ action, index }: ActionItemProps) {
                     <span className="agent-feed-summary">
                         {action.summary || getToolLabel(action.tool_name)}
                     </span>
+=======
+
+    return (
+        <div className="agent-feed-item">
+            <span className="agent-feed-icon">{getToolIcon(action.tool_name)}</span>
+            <div className="agent-feed-content">
+                <div className="agent-feed-row">
+                    <span className="agent-feed-summary">{action.summary}</span>
+>>>>>>> 5b82fa2e71d27a972ba37699c3f642d6766b64a8
                     <div className="agent-feed-meta">
                         {action.iteration !== undefined && (
                             <span className="agent-feed-badge agent-feed-badge--iter">
@@ -188,6 +212,7 @@ export default function AgentActionFeed({
     const [isExpanded, setIsExpanded] = useState(isActive);
     // Track if user has scrolled up (to disable auto-scroll)
     const [userScrolledUp, setUserScrolledUp] = useState(false);
+<<<<<<< HEAD
     // Track action count for animation
     const [prevActionCount, setPrevActionCount] = useState(actions.length);
     const [countAnimating, setCountAnimating] = useState(false);
@@ -206,6 +231,15 @@ export default function AgentActionFeed({
             return () => clearTimeout(timer);
         }
     }, [actions.length, prevActionCount]);
+=======
+
+    // Update expanded state when isActive changes
+    useEffect(() => {
+        if (isActive && !isExpanded) {
+            setIsExpanded(true);
+        }
+    }, [isActive]);
+>>>>>>> 5b82fa2e71d27a972ba37699c3f642d6766b64a8
 
     // Detect scroll position - disable auto-scroll if user scrolled up
     useEffect(() => {
@@ -224,7 +258,11 @@ export default function AgentActionFeed({
 
     // Smart auto-scroll: only scroll if user is near bottom
     useEffect(() => {
+<<<<<<< HEAD
         if (isExpanded && !userScrolledUp && actions.length > 0) {
+=======
+        if (isExpanded && !userScrolledUp) {
+>>>>>>> 5b82fa2e71d27a972ba37699c3f642d6766b64a8
             bottomRef.current?.scrollIntoView({ behavior: "smooth" });
         }
     }, [actions.length, isExpanded, userScrolledUp]);
@@ -233,11 +271,16 @@ export default function AgentActionFeed({
 
     const toggleExpanded = () => setIsExpanded(!isExpanded);
 
+<<<<<<< HEAD
     // Reverse actions to show newest first
     const reversedActions = [...actions].reverse();
 
     return (
         <div className={`agent-feed-card ${!isExpanded ? "collapsed" : ""} ${isActive ? "agent-active" : ""}`}>
+=======
+    return (
+        <div className={`agent-feed-card ${!isExpanded ? "collapsed" : ""}`}>
+>>>>>>> 5b82fa2e71d27a972ba37699c3f642d6766b64a8
             {/* Header with toggle */}
             <div className="agent-feed-header">
                 <div className="agent-feed-header-left">
@@ -252,6 +295,7 @@ export default function AgentActionFeed({
                             {isExpanded ? "▾" : "▸"}
                         </span>
                         <span className="agent-feed-title">
+<<<<<<< HEAD
                             {isActive ? (
                                 <>
                                     <ThinkingDots /> Research in Progress
@@ -259,6 +303,9 @@ export default function AgentActionFeed({
                             ) : (
                                 "Research Complete"
                             )}
+=======
+                            {isActive ? "Research in Progress" : "Research Complete"}
+>>>>>>> 5b82fa2e71d27a972ba37699c3f642d6766b64a8
                         </span>
                     </button>
                     {isActive && <span className="agent-feed-pulse" />}
@@ -266,8 +313,13 @@ export default function AgentActionFeed({
 
                 <div className="agent-feed-header-right">
                     {!isActive && actions.length > 0 && (
+<<<<<<< HEAD
                         <span className={`agent-feed-badge agent-feed-badge--count ${countAnimating ? "agent-action-count-update" : ""}`}>
                             {actions.length} action{actions.length !== 1 ? "s" : ""}
+=======
+                        <span className="agent-feed-badge agent-feed-badge--count">
+                            {actions.length} actions
+>>>>>>> 5b82fa2e71d27a972ba37699c3f642d6766b64a8
                         </span>
                     )}
                     {isActive && onStop && (
@@ -292,23 +344,36 @@ export default function AgentActionFeed({
 
                 {/* Action items list - scrollable */}
                 <div className="agent-feed-list" ref={listRef}>
+<<<<<<< HEAD
                     {reversedActions.map((action, index) => (
                         <ActionItem key={reversedActions.length - 1 - index} action={action} index={index} />
+=======
+                    {actions.map((action, index) => (
+                        <ActionItem key={index} action={action} />
+>>>>>>> 5b82fa2e71d27a972ba37699c3f642d6766b64a8
                     ))}
                     {isActive && actions.length === 0 && (
                         <div className="agent-feed-item agent-feed-item--thinking">
                             <span className="agent-feed-icon">🔥</span>
                             <span className="agent-feed-summary agent-feed-thinking">
+<<<<<<< HEAD
                                 Warming up Nova 2 Lite<ThinkingDots />
+=======
+                                Warming up Nova 2 Lite…
+>>>>>>> 5b82fa2e71d27a972ba37699c3f642d6766b64a8
                             </span>
                         </div>
                     )}
                     {isActive && actions.length > 0 && (
                         <div className="agent-feed-item agent-feed-item--thinking">
                             <span className="agent-feed-icon">💭</span>
+<<<<<<< HEAD
                             <span className="agent-feed-summary agent-feed-thinking">
                                 Thinking<ThinkingDots />
                             </span>
+=======
+                            <span className="agent-feed-summary agent-feed-thinking">Thinking…</span>
+>>>>>>> 5b82fa2e71d27a972ba37699c3f642d6766b64a8
                         </div>
                     )}
                     <div ref={bottomRef} />

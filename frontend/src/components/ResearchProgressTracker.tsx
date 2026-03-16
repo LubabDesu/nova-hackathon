@@ -1,13 +1,23 @@
+<<<<<<< HEAD
 // NovaSync — Research Progress Tracker (Animated Edition)
 // Shows real-time checklist completion based on agent scratchpad notes
 
 import { useMemo, useEffect, useState } from "react";
+=======
+// NovaSync — Research Progress Tracker
+// Shows real-time checklist completion based on agent scratchpad notes
+
+import { useMemo } from "react";
+>>>>>>> 5b82fa2e71d27a972ba37699c3f642d6766b64a8
 
 interface ResearchTask {
     id: string;
     text: string;
     checked: boolean;
+<<<<<<< HEAD
     isNew?: boolean;
+=======
+>>>>>>> 5b82fa2e71d27a972ba37699c3f642d6766b64a8
 }
 
 interface ResearchProgressTrackerProps {
@@ -38,7 +48,10 @@ function parseChecklist(scratchpad: string): ResearchTask[] {
                 id: taskKey,
                 text: text,
                 checked: checked,
+<<<<<<< HEAD
                 isNew: false,
+=======
+>>>>>>> 5b82fa2e71d27a972ba37699c3f642d6766b64a8
             });
         }
     }
@@ -53,6 +66,7 @@ function getProgressSummary(tasks: ResearchTask[]): string {
     return `${completed} of ${tasks.length} tasks completed`;
 }
 
+<<<<<<< HEAD
 // Animated checkmark SVG component
 function CheckmarkIcon({ checked }: { checked: boolean }) {
     return (
@@ -89,10 +103,13 @@ function CheckmarkIcon({ checked }: { checked: boolean }) {
     );
 }
 
+=======
+>>>>>>> 5b82fa2e71d27a972ba37699c3f642d6766b64a8
 export default function ResearchProgressTracker({
     scratchpad,
     isActive,
 }: ResearchProgressTrackerProps) {
+<<<<<<< HEAD
     const [prevTasks, setPrevTasks] = useState<ResearchTask[]>([]);
     const tasks = useMemo(() => parseChecklist(scratchpad), [scratchpad]);
     const summary = useMemo(() => getProgressSummary(tasks), [tasks]);
@@ -102,6 +119,11 @@ export default function ResearchProgressTracker({
         setPrevTasks(tasks);
     }, [tasks]);
 
+=======
+    const tasks = useMemo(() => parseChecklist(scratchpad), [scratchpad]);
+    const summary = useMemo(() => getProgressSummary(tasks), [tasks]);
+
+>>>>>>> 5b82fa2e71d27a972ba37699c3f642d6766b64a8
     if (tasks.length === 0) return null;
 
     const completedCount = tasks.filter((t) => t.checked).length;
@@ -115,6 +137,7 @@ export default function ResearchProgressTracker({
                 <span className="research-progress-summary">{summary}</span>
             </div>
 
+<<<<<<< HEAD
             {/* Progress bar with animated fill */}
             <div className="research-progress-bar-container">
                 <div
@@ -123,11 +146,19 @@ export default function ResearchProgressTracker({
                         width: `${progressPercent}%`,
                         transition: "width 0.5s cubic-bezier(0.22, 1, 0.36, 1)",
                     }}
+=======
+            {/* Progress bar */}
+            <div className="research-progress-bar-container">
+                <div
+                    className="research-progress-bar"
+                    style={{ width: `${progressPercent}%` }}
+>>>>>>> 5b82fa2e71d27a972ba37699c3f642d6766b64a8
                 />
             </div>
 
             {/* Task list */}
             <div className="research-task-list">
+<<<<<<< HEAD
                 {tasks.map((task, index) => {
                     const prevTask = prevTasks.find(t => t.id === task.id);
                     const justCompleted = task.checked && prevTask && !prevTask.checked;
@@ -168,6 +199,19 @@ export default function ResearchProgressTracker({
                         </div>
                     );
                 })}
+=======
+                {tasks.map((task) => (
+                    <div
+                        key={task.id}
+                        className={`research-task ${task.checked ? "checked" : "unchecked"}`}
+                    >
+                        <span className="research-task-checkbox">
+                            {task.checked ? "☑" : "☐"}
+                        </span>
+                        <span className="research-task-text">{task.text}</span>
+                    </div>
+                ))}
+>>>>>>> 5b82fa2e71d27a972ba37699c3f642d6766b64a8
             </div>
 
             {isActive && (

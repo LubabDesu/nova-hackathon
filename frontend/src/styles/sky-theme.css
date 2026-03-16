@@ -780,6 +780,7 @@
     color: #0b1f38;
 }
 
+<<<<<<< HEAD
 .booking-screenshot-expand-btn {
     margin-left: auto;
     background: none;
@@ -799,6 +800,8 @@
     border-color: rgba(74, 141, 196, 0.6);
 }
 
+=======
+>>>>>>> 5b82fa2e71d27a972ba37699c3f642d6766b64a8
 .booking-screenshot-container {
     background: rgba(11, 31, 56, 0.04);
     border: 1px solid rgba(74, 141, 196, 0.15);
@@ -812,10 +815,15 @@
 
 .booking-screenshot {
     width: 100%;
+<<<<<<< HEAD
     max-height: 420px;
     object-fit: contain;
     display: block;
     cursor: zoom-in;
+=======
+    height: auto;
+    display: block;
+>>>>>>> 5b82fa2e71d27a972ba37699c3f642d6766b64a8
 }
 
 .booking-screenshot-placeholder {
@@ -834,7 +842,10 @@
     animation: spin 1.5s linear infinite;
 }
 
+<<<<<<< HEAD
 
+=======
+>>>>>>> 5b82fa2e71d27a972ba37699c3f642d6766b64a8
 /* Logs Section */
 .booking-logs-section {
     margin-bottom: 1.25rem;
@@ -1808,6 +1819,7 @@
 .agent-feed-list:not(:hover)::-webkit-scrollbar-thumb {
   background: rgba(74, 141, 196, 0.15);
 }
+<<<<<<< HEAD
 
 /* ═══════════════════════════════════════════════════════════
    Agent Animations — Supporting styles (appended)
@@ -2236,3 +2248,5 @@
 }
 
 
+=======
+>>>>>>> 5b82fa2e71d27a972ba37699c3f642d6766b64a8
